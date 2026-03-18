@@ -108,12 +108,24 @@ jobs:
           fi
           echo "version=$VER" >> "$GITHUB_OUTPUT"
 
+      - name: Get latest ncurses release version
+        id: ncurses_release
+        run: |
+          VER=$(curl -fsSL "https://ftp.gnu.org/gnu/ncurses/" \
+            | grep -oP 'ncurses-\K[0-9]+\.[0-9]+(?:\.[0-9]+)?' \
+            | sort -V | tail -1)
+          if [ -z "$VER" ]; then
+            echo "ERROR: could not determine latest ncurses version from GNU FTP" >&2
+            exit 1
+          fi
+          echo "version=$VER" >> "$GITHUB_OUTPUT"
+
       - name: Cache Bash for Windows (${{ inputs.arch }})
         id: cache_bash
         uses: actions/cache@v4
         with:
           path: bash.exe
-          key: bash-${{ steps.bash_release.outputs.version }}-${{ inputs.arch }}-llvm-mingw-ncurses-v1
+          key: bash-${{ steps.bash_release.outputs.version }}-ncurses-${{ steps.ncurses_release.outputs.version }}-${{ inputs.arch }}-llvm-mingw-v1
 
       - name: Build statically-linked Bash for Windows (${{ inputs.arch }})
         if: steps.cache_bash.outputs.cache-hit != 'true'
@@ -134,7 +146,7 @@ jobs:
           # --with-build-cc=gcc compiles the host-side ncurses build tools
           # (e.g. the terminfo compiler tic) with the host gcc rather than the
           # cross-compiler.
-          NCURSES_VER=6.5
+          NCURSES_VER="${{ steps.ncurses_release.outputs.version }}"
           curl -fL "https://ftp.gnu.org/gnu/ncurses/ncurses-${NCURSES_VER}.tar.gz" \
             -o ncurses.tar.gz
           tar -xf ncurses.tar.gz
@@ -158,7 +170,7 @@ jobs:
             CC="$TARGET-clang" \
             AR="$TARGET-ar" \
             RANLIB="$TARGET-ranlib" \
-            CFLAGS="-O2"
+            CFLAGS="-O2 -DWIN32_LEAN_AND_MEAN -include windows.h"
           make -j"$(nproc)"
           make install
           cd "$GITHUB_WORKSPACE"
@@ -171,27 +183,21 @@ jobs:
           # enabled; only NLS and job control are disabled, as those cannot
           # work meaningfully on Windows.
           #
-          # Cross-compilation issue: bash's configure probes types on the HOST
-          # (Linux) machine and writes #define macros into config.h for any type
-          # it cannot find.  However, config.h is also included by HOST-compiled
-          # build utilities (mksignames, mksyntax, etc.).  When glibc later
-          # includes those utilities' headers and tries to typedef the same name,
-          # the preprocessor expands the macro inside the typedef declaration —
-          # e.g. "typedef __uid_t uid_t" becomes "typedef unsigned int int" —
-          # which triggers "two or more data types in declaration specifiers".
+          # Cross-compilation: bash's configure cannot run test binaries on the
+          # host, so it defaults to emitting "#define uid_t int" etc. in
+          # config.h for any POSIX type it cannot probe.  Those macros are then
+          # included by HOST-compiled build utilities (mksignames, mksyntax,
+          # …); when glibc later typedefs the same name (e.g.
+          # "typedef __uid_t uid_t"), the preprocessor expands the macro and
+          # produces "typedef unsigned int int", triggering "two or more data
+          # types in declaration specifiers".
           #
-          # Fix A: types that MinGW already defines in <sys/types.h> (u_int,
-          # u_long, u_short, u_char) are declared as available via ac_cv_type_*
-          # cache variables, preventing config.h from emitting the conflicting
-          # #define macros entirely.
-          #
-          # Fix B: remaining POSIX types that MinGW does NOT define but that
-          # bash must provide (uid_t, gid_t, clock_t, …) are patched after
-          # configure by wrapping each #define with the glibc guard macro that
-          # glibc itself sets after typedef'ing the type.  On the host the guard
-          # macro is already set by the time config.h is processed, so the
-          # #define is suppressed and glibc's typedef is used unchanged.  On the
-          # Windows target the guard is not set, so the #define applies normally.
+          # Root-cause fix: use autoconf's ac_cv_type_* cache variables to
+          # declare that every POSIX type of concern is already available on
+          # the target.  configure then skips the type checks and emits no
+          # conflicting #define macros into config.h.  The types are either
+          # provided by MinGW-w64's headers or never referenced in the
+          # Windows-relevant code paths, so supplying "yes" is safe.
           curl -fL "https://ftp.gnu.org/gnu/bash/bash-${BASH_VER}.tar.gz" \
             -o bash.tar.gz
           tar -xf bash.tar.gz
@@ -218,6 +224,16 @@ jobs:
             ac_cv_type_u_long=yes \
             ac_cv_type_u_short=yes \
             ac_cv_type_u_char=yes \
+            ac_cv_type_uid_t=yes \
+            ac_cv_type_gid_t=yes \
+            ac_cv_type_clock_t=yes \
+            ac_cv_type_pid_t=yes \
+            ac_cv_type_mode_t=yes \
+            ac_cv_type_dev_t=yes \
+            ac_cv_type_ino_t=yes \
+            ac_cv_type_nlink_t=yes \
+            ac_cv_type_off_t=yes \
+            ac_cv_type_time_t=yes \
             CC="$TARGET-clang" \
             AR="$TARGET-ar" \
             RANLIB="$TARGET-ranlib" \
@@ -225,10 +241,6 @@ jobs:
             CPPFLAGS="-I${SYSROOT}/include" \
             LDFLAGS="-L${SYSROOT}/lib -static" \
             CFLAGS="-O2"
-
-          # Patch config.h: wrap remaining POSIX type #define macros with the
-          # glibc guard macro for each type (Fix B described above).
-          python3 "$GITHUB_WORKSPACE/scripts/fix-config-h.py" config.h
 
           make -j"$(nproc)"
           cp bash.exe "$GITHUB_WORKSPACE/bash.exe"
