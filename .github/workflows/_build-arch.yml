@@ -125,7 +125,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: bash.exe
-          key: bash-${{ steps.bash_release.outputs.version }}-ncurses-${{ steps.ncurses_release.outputs.version }}-${{ inputs.arch }}-llvm-mingw-v3
+          key: bash-${{ steps.bash_release.outputs.version }}-ncurses-${{ steps.ncurses_release.outputs.version }}-${{ inputs.arch }}-llvm-mingw-v4
 
       - name: Build statically-linked Bash for Windows (${{ inputs.arch }})
         if: steps.cache_bash.outputs.cache-hit != 'true'
@@ -138,19 +138,27 @@ jobs:
 
           # ── ncurses (terminal support for readline) ──────────────────────────
           # ncurses is cross-compiled for the Windows target and installed into
-          # a local sysroot as a static library.  Under Wine the Win32 console
-          # driver provides readline terminal handling via Win32 console API.
+          # a local sysroot as a static library.
           #
-          # ncurses's own build system adds -DWIN32_LEAN_AND_MEAN globally for
-          # Win32 targets, which prevents windows.h from pulling in wincon.h
-          # (needed for KEY_EVENT etc. in lib_win32con.c).  The fix is to pass
-          # -UWIN32_LEAN_AND_MEAN in CFLAGS (which ncurses appends after its own
-          # Makefile flags), undoing that define so that -include windows.h then
-          # pulls in the full Win32 headers, including wincon.h.
+          # The Win32 console driver (lib_win32con.c) requires KEY_EVENT and
+          # other types from wincon.h, but ncurses's own configure adds
+          # -DWIN32_LEAN_AND_MEAN globally (via CF_WITH_WINCON), which prevents
+          # windows.h from pulling in wincon.h.  Rather than fighting that with
+          # command-line -U/-include flags (which ncurses's Makefile reorders),
+          # the root-cause fix is to pre-seed the configure check result:
           #
-          # ac_cv_func_putenv=yes pre-seeds the configure check for putenv
-          # (cross-compilation cannot run probe binaries; MinGW-w64 provides
-          # putenv via its CRT compatibility layer).
+          #   ac_cv_header_wincon_h=no
+          #
+          # With this cache variable, configure believes wincon.h is unavailable,
+          # so CF_WITH_WINCON sets cf_with_wincon=no and never adds
+          # -DWIN32_LEAN_AND_MEAN or USE_WIN32CON_DRIVER to the build flags.
+          # ncurses then uses the generic term-driver path (USE_TERM_DRIVER is
+          # still defined), which is backed by the terminfo driver at runtime.
+          # Under Wine the terminfo driver works correctly because Wine exposes
+          # POSIX-compatible terminal APIs (isatty, tcgetattr, etc.).
+          #
+          # ac_cv_func_putenv=yes pre-seeds the putenv probe (MinGW-w64
+          # provides putenv; cross-compile cannot run the test binary).
           #
           # --with-build-cc=gcc compiles the host-side ncurses build tools
           # (e.g. the terminfo compiler tic) with the host gcc rather than the
@@ -177,10 +185,11 @@ jobs:
             --without-progs \
             --without-tests \
             ac_cv_func_putenv=yes \
+            ac_cv_header_wincon_h=no \
             CC="$TARGET-clang" \
             AR="$TARGET-ar" \
             RANLIB="$TARGET-ranlib" \
-            CFLAGS="-O2 -UWIN32_LEAN_AND_MEAN -include windows.h"
+            CFLAGS="-O2"
           make -j"$(nproc)"
           make install
           cd "$GITHUB_WORKSPACE"
