@@ -24,28 +24,24 @@ jobs:
         run: |
           case "${{ matrix.arch }}" in
             x86)
-              echo "mingw_arch=i686"      >> "$GITHUB_OUTPUT"
-              echo "qemu_arch=i386"       >> "$GITHUB_OUTPUT"
-              echo "debian_arch=i386"     >> "$GITHUB_OUTPUT"
-              echo "pwsh_arch=win-x86"    >> "$GITHUB_OUTPUT"
+              echo "mingw_arch=i686"    >> "$GITHUB_OUTPUT"
+              echo "qemu_arch=i386"     >> "$GITHUB_OUTPUT"
+              echo "debian_arch=i386"   >> "$GITHUB_OUTPUT"
               ;;
             x64)
-              echo "mingw_arch=x86_64"    >> "$GITHUB_OUTPUT"
-              echo "qemu_arch=x86_64"     >> "$GITHUB_OUTPUT"
-              echo "debian_arch=amd64"    >> "$GITHUB_OUTPUT"
-              echo "pwsh_arch=win-x64"    >> "$GITHUB_OUTPUT"
+              echo "mingw_arch=x86_64"  >> "$GITHUB_OUTPUT"
+              echo "qemu_arch=x86_64"   >> "$GITHUB_OUTPUT"
+              echo "debian_arch=amd64"  >> "$GITHUB_OUTPUT"
               ;;
             ARM)
-              echo "mingw_arch=armv7"     >> "$GITHUB_OUTPUT"
-              echo "qemu_arch=arm"        >> "$GITHUB_OUTPUT"
-              echo "debian_arch=armhf"    >> "$GITHUB_OUTPUT"
-              echo "pwsh_arch=win-x86"    >> "$GITHUB_OUTPUT"
+              echo "mingw_arch=armv7"   >> "$GITHUB_OUTPUT"
+              echo "qemu_arch=arm"      >> "$GITHUB_OUTPUT"
+              echo "debian_arch=armhf"  >> "$GITHUB_OUTPUT"
               ;;
             ARM64)
-              echo "mingw_arch=aarch64"   >> "$GITHUB_OUTPUT"
-              echo "qemu_arch=aarch64"    >> "$GITHUB_OUTPUT"
-              echo "debian_arch=arm64"    >> "$GITHUB_OUTPUT"
-              echo "pwsh_arch=win-arm64"  >> "$GITHUB_OUTPUT"
+              echo "mingw_arch=aarch64" >> "$GITHUB_OUTPUT"
+              echo "qemu_arch=aarch64"  >> "$GITHUB_OUTPUT"
+              echo "debian_arch=arm64"  >> "$GITHUB_OUTPUT"
               ;;
           esac
 
@@ -64,53 +60,93 @@ jobs:
         uses: actions/cache@v4
         with:
           path: llvm-mingw
-          key: llvm-mingw-${{ steps.llvm_release.outputs.tag }}-ubuntu-x86_64
+          key: llvm-mingw-${{ steps.llvm_release.outputs.tag }}-ucrt-ubuntu-x86_64
 
       - name: Download and extract llvm-mingw
         if: steps.cache_llvm.outputs.cache-hit != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           TAG="${{ steps.llvm_release.outputs.tag }}"
-          URL="https://github.com/mstorsjo/llvm-mingw/releases/download/${TAG}/llvm-mingw-${TAG}-ucrt-ubuntu-22.04-x86_64.tar.xz"
+          # Pick the UCRT Ubuntu x86_64 tarball.  When multiple Ubuntu versions
+          # are published for the same release, sort_by(.name) yields the oldest
+          # first (e.g. ubuntu-20.04 before ubuntu-22.04) for maximum runner
+          # compatibility.
+          URL=$(gh api "repos/mstorsjo/llvm-mingw/releases/tags/${TAG}" \
+            --jq '[.assets[]
+                   | select(.name | test("ucrt-ubuntu-.*-x86_64\\.tar\\.xz$"))]
+                  | sort_by(.name) | .[0].browser_download_url')
           curl -fL "$URL" -o llvm-mingw.tar.xz
           mkdir llvm-mingw
           tar -xf llvm-mingw.tar.xz --strip-components=1 -C llvm-mingw
           rm llvm-mingw.tar.xz
 
-      # ── Cross-compile ───────────────────────────────────────────────────────
+      # ── Cross-compile hello.exe ─────────────────────────────────────────────
 
       - name: Cross-compile hello.exe for ${{ matrix.arch }}
         run: |
           export PATH="$PWD/llvm-mingw/bin:$PATH"
           "${{ steps.vars.outputs.mingw_arch }}-w64-mingw32-c++" -o hello.exe hello.cpp
 
-      # ── PowerShell for Windows ──────────────────────────────────────────────
+      # ── Build statically-linked Bash for Windows ────────────────────────────
+      #
+      # bash is cross-compiled with llvm-mingw and linked fully statically so
+      # that no DLLs need to be copied into the Wine environment.  The build is
+      # cached per architecture; only the resulting bash.exe is kept (not the
+      # entire source+object tree).
 
-      - name: Get latest PowerShell release tag
-        id: pwsh_release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          TAG=$(gh api repos/PowerShell/PowerShell/releases/latest --jq .tag_name)
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-
-      - name: Cache PowerShell for Windows
-        id: cache_pwsh
+      - name: Cache Bash for Windows (${{ matrix.arch }})
+        id: cache_bash
         uses: actions/cache@v4
         with:
-          path: pwsh
-          key: pwsh-${{ steps.pwsh_release.outputs.tag }}-${{ steps.vars.outputs.pwsh_arch }}
+          path: bash.exe
+          key: bash-5.2.37-${{ matrix.arch }}-llvm-mingw-static-v1
 
-      - name: Download and extract PowerShell for Windows
-        if: steps.cache_pwsh.outputs.cache-hit != 'true'
+      - name: Build statically-linked Bash for Windows (${{ matrix.arch }})
+        if: steps.cache_bash.outputs.cache-hit != 'true'
         run: |
-          TAG="${{ steps.pwsh_release.outputs.tag }}"
-          PWSH_ARCH="${{ steps.vars.outputs.pwsh_arch }}"
-          VERSION="${TAG#v}"
-          URL="https://github.com/PowerShell/PowerShell/releases/download/${TAG}/PowerShell-${VERSION}-${PWSH_ARCH}.zip"
-          curl -fL "$URL" -o pwsh.zip
-          mkdir pwsh
-          unzip -q pwsh.zip -d pwsh
-          rm pwsh.zip
+          TARGET="${{ steps.vars.outputs.mingw_arch }}-w64-mingw32"
+          export PATH="$PWD/llvm-mingw/bin:$PATH"
+
+          curl -fL "https://ftp.gnu.org/gnu/bash/bash-5.2.37.tar.gz" \
+            -o bash.tar.gz
+          tar -xf bash.tar.gz
+          cd bash-5.2.37
+
+          # Cross-compile configure flags for a minimal statically-linked
+          # Windows PE.  Readline, NLS, job control and interactive history are
+          # all disabled — we only need non-interactive script execution.
+          # Several cache variables must be preset because cross-compilation
+          # cannot run the target's binaries to probe them.
+          ./configure \
+            --host="$TARGET" \
+            --build=x86_64-linux-gnu \
+            --without-bash-malloc \
+            --without-readline \
+            --disable-nls \
+            --disable-history \
+            --disable-bang-history \
+            --disable-job-control \
+            --disable-directory-stack \
+            --disable-alias \
+            --disable-progcomp \
+            --disable-prompt-string-decoding \
+            --disable-net-redirections \
+            bash_cv_have_mbstate_t=yes \
+            bash_cv_getcwd_malloc=yes \
+            bash_cv_func_sigsetjmp=present \
+            bash_cv_opendir_not_robust=yes \
+            bash_cv_ulimit_maxfds=yes \
+            bash_cv_must_reinstall_sighandlers=no \
+            bash_cv_job_control_missing=missing \
+            bash_cv_sys_named_pipes=missing \
+            LDFLAGS="-static" \
+            CFLAGS="-O2"
+
+          make -j$(nproc)
+          cp bash.exe "$GITHUB_WORKSPACE/bash.exe"
+          cd "$GITHUB_WORKSPACE"
+          rm -rf bash-5.2.37 bash.tar.gz
 
       # ── QEMU + Debian chroot + WINE ─────────────────────────────────────────
 
@@ -164,33 +200,36 @@ jobs:
 
       # ── Run under emulation ─────────────────────────────────────────────────
 
-      - name: Run hello.exe via PowerShell on WINE (${{ matrix.arch }})
+      - name: Run hello.sh via bash.exe on WINE (${{ matrix.arch }})
         run: |
           sudo cp hello.exe /chroot/hello.exe
-          sudo cp hello.ps1 /chroot/hello.ps1
-          sudo cp -r pwsh    /chroot/pwsh
+          sudo cp bash.exe  /chroot/bash.exe
+          sudo cp hello.sh  /chroot/hello.sh
 
-          # Bind-mount /proc, /dev, and /sys so that Wine's wineserver and
-          # .NET CoreCLR (PowerShell's runtime) can access kernel interfaces.
+          # Bind-mount /proc and /dev so that Wine's wineserver can access
+          # kernel interfaces (e.g. /proc/self/fd, /dev/urandom).
           sudo mount --bind /proc /chroot/proc
           sudo mount --bind /dev  /chroot/dev
-          sudo mount --bind /sys  /chroot/sys
-          trap 'sudo umount /chroot/sys  2>/dev/null || true
-                sudo umount /chroot/dev  2>/dev/null || true
+          trap 'sudo umount /chroot/dev  2>/dev/null || true
                 sudo umount /chroot/proc 2>/dev/null || true' EXIT
 
-          # For non-x64 architectures, binfmt_misc transparently routes the
-          # Wine ELF binary through the appropriate qemu-<arch>-static.
-          # For x64, Wine runs natively since the runner is also x86_64.
-          # Invoking Wine via binfmt_misc (rather than calling qemu-static
-          # explicitly) is required: explicit invocation conflicts with Wine's
-          # preloader memory-reservation mechanism, causing ntdll.so to fail.
+          # binfmt_misc (F flag) transparently routes foreign-arch Wine ELF
+          # binaries through qemu-<arch>-static on exec().  For x64, Wine runs
+          # natively on the x86_64 runner.
           #
-          # ARM uses win-x86 PowerShell — Wine on ARM32 includes a built-in
-          # x86 CPU emulator that allows it to run x86 Windows PE binaries.
+          # QEMU_EXECVE=1 additionally instructs qemu-user to intercept any
+          # execve(2) call made from within the emulated process and re-route it
+          # back through qemu-static.  This ensures that every Linux ELF spawned
+          # from inside the QEMU sandbox is itself emulated, preventing execution
+          # from ever returning to native host code.
+          #
+          # hello.exe is a Windows PE binary.  bash.exe launches it via the
+          # Win32 CreateProcess() API, which Wine handles entirely internally —
+          # no Linux execve() is issued for PE files, so hello.exe never leaves
+          # the Wine API-translation layer.
           sudo chroot /chroot \
-            env HOME=/tmp WINEDEBUG=-all \
-            wine /pwsh/pwsh.exe -NonInteractive -File 'Z:\hello.ps1'
+            env HOME=/tmp WINEDEBUG=-all QEMU_EXECVE=1 \
+            wine /bash.exe Z:/hello.sh
 
       # ── Artifact upload ─────────────────────────────────────────────────────
 
