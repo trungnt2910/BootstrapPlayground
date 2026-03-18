@@ -125,7 +125,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: bash.exe
-          key: bash-${{ steps.bash_release.outputs.version }}-ncurses-${{ steps.ncurses_release.outputs.version }}-${{ inputs.arch }}-llvm-mingw-v1
+          key: bash-${{ steps.bash_release.outputs.version }}-ncurses-${{ steps.ncurses_release.outputs.version }}-${{ inputs.arch }}-llvm-mingw-v2
 
       - name: Build statically-linked Bash for Windows (${{ inputs.arch }})
         if: steps.cache_bash.outputs.cache-hit != 'true'
@@ -138,10 +138,11 @@ jobs:
 
           # ── ncurses (terminal support for readline) ──────────────────────────
           # ncurses is cross-compiled for the Windows target and installed into
-          # a local sysroot as a static library.  Under Wine the Win32 console
-          # API calls that ncurses makes are transparently mapped to the host
-          # Linux terminal, giving readline full terminal handling (line editing,
-          # colour, cursor movement).
+          # a local sysroot as a static library.  --disable-term-driver builds
+          # ncurses with the classic terminfo backend instead of the Win32
+          # console driver (lib_win32con.c), avoiding Win32 console API headers
+          # that are not fully available during cross-compilation.  Under Wine
+          # the classic terminfo path still provides readline terminal handling.
           #
           # --with-build-cc=gcc compiles the host-side ncurses build tools
           # (e.g. the terminfo compiler tic) with the host gcc rather than the
@@ -167,11 +168,12 @@ jobs:
             --without-manpages \
             --without-progs \
             --without-tests \
+            --disable-term-driver \
             ac_cv_func_putenv=yes \
             CC="$TARGET-clang" \
             AR="$TARGET-ar" \
             RANLIB="$TARGET-ranlib" \
-            CFLAGS="-O2 -DWIN32_LEAN_AND_MEAN -include windows.h -include wincon.h"
+            CFLAGS="-O2"
           make -j"$(nproc)"
           make install
           cd "$GITHUB_WORKSPACE"
