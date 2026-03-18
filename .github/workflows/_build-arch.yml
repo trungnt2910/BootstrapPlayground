@@ -1,0 +1,351 @@
+name: Build (single arch)
+
+on:
+  workflow_call:
+    inputs:
+      arch:
+        description: 'Target architecture: x86, x64, ARM, or ARM64'
+        required: true
+        type: string
+
+jobs:
+  build:
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up architecture variables
+        id: vars
+        run: |
+          case "${{ inputs.arch }}" in
+            x86)
+              echo "mingw_arch=i686"    >> "$GITHUB_OUTPUT"
+              echo "debian_arch=i386"   >> "$GITHUB_OUTPUT"
+              ;;
+            x64)
+              echo "mingw_arch=x86_64"  >> "$GITHUB_OUTPUT"
+              echo "debian_arch=amd64"  >> "$GITHUB_OUTPUT"
+              ;;
+            ARM)
+              echo "mingw_arch=armv7"   >> "$GITHUB_OUTPUT"
+              echo "debian_arch=armhf"  >> "$GITHUB_OUTPUT"
+              ;;
+            ARM64)
+              echo "mingw_arch=aarch64" >> "$GITHUB_OUTPUT"
+              echo "debian_arch=arm64"  >> "$GITHUB_OUTPUT"
+              ;;
+          esac
+
+      # ── llvm-mingw toolchain ────────────────────────────────────────────────
+
+      - name: Get latest llvm-mingw release tag
+        id: llvm_release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG=$(gh api repos/mstorsjo/llvm-mingw/releases/latest --jq .tag_name)
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Cache llvm-mingw toolchain
+        id: cache_llvm
+        uses: actions/cache@v4
+        with:
+          path: llvm-mingw
+          key: llvm-mingw-${{ steps.llvm_release.outputs.tag }}-ucrt-ubuntu-x86_64
+
+      - name: Download and extract llvm-mingw
+        if: steps.cache_llvm.outputs.cache-hit != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ steps.llvm_release.outputs.tag }}"
+          # Select the UCRT Ubuntu x86_64 tarball.  When multiple Ubuntu versions
+          # are published for the same release, sort_by(.name) picks the oldest
+          # Ubuntu version first (e.g. ubuntu-20.04 before ubuntu-22.04) for
+          # maximum runner compatibility.
+          URL=$(gh api "repos/mstorsjo/llvm-mingw/releases/tags/${TAG}" \
+            --jq '[.assets[]
+                   | select(.name | test("ucrt-ubuntu-.*-x86_64\\.tar\\.xz$"))]
+                  | sort_by(.name) | .[0].browser_download_url')
+          curl -fL "$URL" -o llvm-mingw.tar.xz
+          mkdir llvm-mingw
+          tar -xf llvm-mingw.tar.xz --strip-components=1 -C llvm-mingw
+          rm llvm-mingw.tar.xz
+
+      # ── Cross-compile hello.exe ─────────────────────────────────────────────
+
+      - name: Cross-compile hello.exe for ${{ inputs.arch }}
+        run: |
+          export PATH="$PWD/llvm-mingw/bin:$PATH"
+          # Use clang++ explicitly to ensure llvm-mingw's clang is the compiler,
+          # not the system gcc that the generic c++ wrapper might resolve to.
+          "${{ steps.vars.outputs.mingw_arch }}-w64-mingw32-clang++" \
+            -o hello.exe hello.cpp
+
+      # ── Build statically-linked Bash for Windows ────────────────────────────
+      #
+      # Bash is cross-compiled with llvm-mingw (clang) and linked fully
+      # statically.  ncurses is cross-compiled first as a static library to
+      # provide full readline support (command-line editing, history, tab
+      # completion) — useful for interactive debugging inside Wine.
+      #
+      # The build is cached per architecture and bash version; only bash.exe
+      # is kept (not the source or object trees).
+
+      - name: Get latest Bash release version
+        id: bash_release
+        run: |
+          VER=$(curl -fsSL "https://ftp.gnu.org/gnu/bash/" \
+            | grep -oP 'bash-\K[0-9]+\.[0-9]+(?:\.[0-9]+)?' \
+            | sort -V | tail -1)
+          if [ -z "$VER" ]; then
+            echo "ERROR: could not determine latest bash version from GNU FTP" >&2
+            exit 1
+          fi
+          echo "version=$VER" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Bash for Windows (${{ inputs.arch }})
+        id: cache_bash
+        uses: actions/cache@v4
+        with:
+          path: bash.exe
+          key: bash-${{ steps.bash_release.outputs.version }}-${{ inputs.arch }}-llvm-mingw-ncurses-v1
+
+      - name: Build statically-linked Bash for Windows (${{ inputs.arch }})
+        if: steps.cache_bash.outputs.cache-hit != 'true'
+        run: |
+          TARGET="${{ steps.vars.outputs.mingw_arch }}-w64-mingw32"
+          export PATH="$PWD/llvm-mingw/bin:$PATH"
+          BASH_VER="${{ steps.bash_release.outputs.version }}"
+          SYSROOT="$PWD/deps"
+          mkdir -p "$SYSROOT"
+
+          # ── ncurses (terminal support for readline) ──────────────────────────
+          # ncurses is cross-compiled for the Windows target and installed into
+          # a local sysroot as a static library.  Under Wine the Win32 console
+          # API calls that ncurses makes are transparently mapped to the host
+          # Linux terminal, giving readline full terminal handling (line editing,
+          # colour, cursor movement).
+          #
+          # --with-build-cc=gcc compiles the host-side ncurses build tools
+          # (e.g. the terminfo compiler tic) with the host gcc rather than the
+          # cross-compiler.
+          NCURSES_VER=6.5
+          curl -fL "https://ftp.gnu.org/gnu/ncurses/ncurses-${NCURSES_VER}.tar.gz" \
+            -o ncurses.tar.gz
+          tar -xf ncurses.tar.gz
+          mkdir ncurses-build
+          cd ncurses-build
+          "../ncurses-${NCURSES_VER}/configure" \
+            --host="$TARGET" \
+            --build=x86_64-linux-gnu \
+            --prefix="$SYSROOT" \
+            --with-build-cc=gcc \
+            --without-ada \
+            --without-cxx \
+            --without-cxx-binding \
+            --enable-static \
+            --disable-shared \
+            --with-normal \
+            --without-debug \
+            --without-manpages \
+            --without-progs \
+            --without-tests \
+            CC="$TARGET-clang" \
+            AR="$TARGET-ar" \
+            RANLIB="$TARGET-ranlib" \
+            CFLAGS="-O2"
+          make -j"$(nproc)"
+          make install
+          cd "$GITHUB_WORKSPACE"
+          rm -rf "ncurses-${NCURSES_VER}" ncurses-build ncurses.tar.gz
+
+          # ── bash ─────────────────────────────────────────────────────────────
+          # bash is configured with its bundled readline library using the static
+          # ncurses above for terminal I/O.  All standard interactive features
+          # (history, aliases, completion, pushd/popd, prompt decoding) are
+          # enabled; only NLS and job control are disabled, as those cannot
+          # work meaningfully on Windows.
+          #
+          # Cross-compilation issue: bash's configure probes types on the HOST
+          # (Linux) machine and writes #define macros into config.h for any type
+          # it cannot find.  However, config.h is also included by HOST-compiled
+          # build utilities (mksignames, mksyntax, etc.).  When glibc later
+          # includes those utilities' headers and tries to typedef the same name,
+          # the preprocessor expands the macro inside the typedef declaration —
+          # e.g. "typedef __uid_t uid_t" becomes "typedef unsigned int int" —
+          # which triggers "two or more data types in declaration specifiers".
+          #
+          # Fix A: types that MinGW already defines in <sys/types.h> (u_int,
+          # u_long, u_short, u_char) are declared as available via ac_cv_type_*
+          # cache variables, preventing config.h from emitting the conflicting
+          # #define macros entirely.
+          #
+          # Fix B: remaining POSIX types that MinGW does NOT define but that
+          # bash must provide (uid_t, gid_t, clock_t, …) are patched after
+          # configure by wrapping each #define with the glibc guard macro that
+          # glibc itself sets after typedef'ing the type.  On the host the guard
+          # macro is already set by the time config.h is processed, so the
+          # #define is suppressed and glibc's typedef is used unchanged.  On the
+          # Windows target the guard is not set, so the #define applies normally.
+          curl -fL "https://ftp.gnu.org/gnu/bash/bash-${BASH_VER}.tar.gz" \
+            -o bash.tar.gz
+          tar -xf bash.tar.gz
+          cd "bash-${BASH_VER}"
+
+          # CC must be set explicitly so configure uses llvm-mingw's clang
+          # rather than the system gcc for cross-compilation.
+          # CC_FOR_BUILD stays as gcc (the host compiler) for build-side tools.
+          ./configure \
+            --host="$TARGET" \
+            --build=x86_64-linux-gnu \
+            --without-bash-malloc \
+            --with-curses \
+            --disable-nls \
+            bash_cv_have_mbstate_t=yes \
+            bash_cv_getcwd_malloc=yes \
+            bash_cv_func_sigsetjmp=present \
+            bash_cv_opendir_not_robust=yes \
+            bash_cv_ulimit_maxfds=yes \
+            bash_cv_must_reinstall_sighandlers=no \
+            bash_cv_job_control_missing=missing \
+            bash_cv_sys_named_pipes=missing \
+            ac_cv_type_u_int=yes \
+            ac_cv_type_u_long=yes \
+            ac_cv_type_u_short=yes \
+            ac_cv_type_u_char=yes \
+            CC="$TARGET-clang" \
+            AR="$TARGET-ar" \
+            RANLIB="$TARGET-ranlib" \
+            CC_FOR_BUILD=gcc \
+            CPPFLAGS="-I${SYSROOT}/include" \
+            LDFLAGS="-L${SYSROOT}/lib -static" \
+            CFLAGS="-O2"
+
+          # Patch config.h: wrap remaining POSIX type #define macros with the
+          # glibc guard macro for each type (Fix B described above).
+          python3 - <<'PYEOF'
+import re
+with open('config.h') as f:
+    text = f.read()
+# Map each POSIX type to the glibc guard macro set when glibc typedefs it.
+guards = {
+    'uid_t':   '__uid_t_defined',
+    'gid_t':   '__gid_t_defined',
+    'clock_t': '__clock_t_defined',
+    'pid_t':   '__pid_t_defined',
+    'mode_t':  '__mode_t_defined',
+    'dev_t':   '__dev_t_defined',
+    'ino_t':   '__ino_t_defined',
+    'nlink_t': '__nlink_t_defined',
+    'off_t':   '__off_t_defined',
+    'time_t':  '__time_t_defined',
+}
+for typename, guard in guards.items():
+    text = re.sub(
+        rf'^(#define {re.escape(typename)} .+)$',
+        rf'#ifndef {guard}\n\1\n#define {guard}\n#endif',
+        text, flags=re.MULTILINE)
+with open('config.h', 'w') as f:
+    f.write(text)
+PYEOF
+
+          make -j"$(nproc)"
+          cp bash.exe "$GITHUB_WORKSPACE/bash.exe"
+          cd "$GITHUB_WORKSPACE"
+          rm -rf "bash-${BASH_VER}" bash.tar.gz deps
+
+      # ── QEMU + Debian chroot + WINE ─────────────────────────────────────────
+
+      - name: Install QEMU user-mode emulation and debootstrap
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y qemu-user-static binfmt-support debootstrap
+
+      - name: Cache Debian bookworm chroot with WINE
+        id: cache_chroot
+        uses: actions/cache@v4
+        with:
+          path: chroot.tar.zst
+          key: chroot-bookworm-${{ steps.vars.outputs.debian_arch }}-wine-v2
+
+      - name: Create Debian chroot and install WINE
+        if: steps.cache_chroot.outputs.cache-hit != 'true'
+        run: |
+          DEBIAN_ARCH="${{ steps.vars.outputs.debian_arch }}"
+
+          # Bootstrap a Debian bookworm root filesystem for the target arch.
+          # qemu-debootstrap handles the QEMU-assisted second stage automatically
+          # for foreign architectures; for native arches it behaves like plain
+          # debootstrap.
+          sudo qemu-debootstrap \
+            --arch="$DEBIAN_ARCH" \
+            bookworm /chroot \
+            http://deb.debian.org/debian
+
+          # After qemu-debootstrap, binfmt_misc is registered on the host for
+          # every foreign architecture.  Chroot commands can be invoked directly
+          # without specifying the QEMU interpreter explicitly — the kernel
+          # dispatches foreign ELF binaries through binfmt_misc automatically.
+          sudo chroot /chroot apt-get update -q
+
+          # Detect the latest Wine version available in the distro's repository.
+          WINE_VERSION=$(sudo chroot /chroot apt-cache policy wine \
+            | grep Candidate | awk '{print $2}')
+          echo "Latest available Wine version for ${DEBIAN_ARCH}: ${WINE_VERSION}"
+
+          # Install Wine.
+          sudo chroot /chroot apt-get install -y wine
+
+          # Pack the chroot for caching (zstd for a good speed/size trade-off).
+          sudo tar --zstd -cf chroot.tar.zst -C / chroot
+
+      - name: Restore Debian chroot from cache
+        if: steps.cache_chroot.outputs.cache-hit == 'true'
+        run: |
+          sudo tar --zstd -xf chroot.tar.zst -C /
+
+      # ── Run under emulation ─────────────────────────────────────────────────
+
+      - name: Run hello.sh via bash.exe on WINE (${{ inputs.arch }})
+        run: |
+          sudo cp hello.exe /chroot/hello.exe
+          sudo cp bash.exe  /chroot/bash.exe
+          sudo cp hello.sh  /chroot/hello.sh
+
+          # Bind-mount /proc and /dev so that Wine's wineserver can access
+          # kernel interfaces (e.g. /proc/self/fd, /dev/urandom).
+          sudo mount --bind /proc /chroot/proc
+          sudo mount --bind /dev  /chroot/dev
+          trap 'sudo umount /chroot/dev  2>/dev/null || true
+                sudo umount /chroot/proc 2>/dev/null || true' EXIT
+
+          # binfmt_misc (F flag) transparently routes foreign-arch Wine ELF
+          # binaries through qemu-<arch>-static on exec().  For x64, Wine runs
+          # natively on the x86_64 runner.
+          #
+          # QEMU_EXECVE=1 instructs qemu-user to intercept execve(2) calls from
+          # within the emulated process and re-route them back through qemu-static,
+          # preventing any Linux ELF from escaping the QEMU sandbox.
+          #
+          # hello.exe is a Windows PE binary launched by bash.exe via the Win32
+          # CreateProcess() API, which Wine handles internally — no Linux execve()
+          # is issued for PE files, so hello.exe never leaves the Wine API-
+          # translation layer.
+          sudo chroot /chroot \
+            env HOME=/tmp WINEDEBUG=-all QEMU_EXECVE=1 \
+            wine /bash.exe Z:/hello.sh
+
+      # ── Artifact upload ─────────────────────────────────────────────────────
+
+      - name: Upload binary artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hello-${{ inputs.arch }}
+          path: hello.exe
+          if-no-files-found: ignore

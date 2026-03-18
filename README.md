@@ -23,12 +23,12 @@ A playground for cross-compiling Windows binaries with [llvm-mingw](https://gith
 
 ## Architectures
 
-| Matrix name | MinGW target | Debian arch | QEMU arch |
-|-------------|--------------|-------------|-----------|
-| `x86`       | `i686-w64-mingw32`    | `i386`  | `i386`   |
-| `x64`       | `x86_64-w64-mingw32`  | `amd64` | `x86_64` |
-| `ARM`       | `armv7-w64-mingw32`   | `armhf` | `arm`    |
-| `ARM64`     | `aarch64-w64-mingw32` | `arm64` | `aarch64`|
+| Matrix name | MinGW target | Debian arch | QEMU arch | Status |
+|-------------|--------------|-------------|-----------|--------|
+| `x86`       | `i686-w64-mingw32`    | `i386`  | `i386`    | [![Build (x86)](https://github.com/trungnt2910/BootstrapPlayground/actions/workflows/build-x86.yml/badge.svg)](https://github.com/trungnt2910/BootstrapPlayground/actions/workflows/build-x86.yml) |
+| `x64`       | `x86_64-w64-mingw32`  | `amd64` | `x86_64`  | [![Build (x64)](https://github.com/trungnt2910/BootstrapPlayground/actions/workflows/build-x64.yml/badge.svg)](https://github.com/trungnt2910/BootstrapPlayground/actions/workflows/build-x64.yml) |
+| `ARM`       | `armv7-w64-mingw32`   | `armhf` | `arm`     | [![Build (ARM)](https://github.com/trungnt2910/BootstrapPlayground/actions/workflows/build-arm.yml/badge.svg)](https://github.com/trungnt2910/BootstrapPlayground/actions/workflows/build-arm.yml) |
+| `ARM64`     | `aarch64-w64-mingw32` | `arm64` | `aarch64` | [![Build (ARM64)](https://github.com/trungnt2910/BootstrapPlayground/actions/workflows/build-arm64.yml/badge.svg)](https://github.com/trungnt2910/BootstrapPlayground/actions/workflows/build-arm64.yml) |
 
 ## Community
 

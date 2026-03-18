@@ -1,0 +1,15 @@
+name: Build (ARM64)
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    uses: ./.github/workflows/_build-arch.yml
+    with:
+      arch: ARM64
+    secrets: inherit
