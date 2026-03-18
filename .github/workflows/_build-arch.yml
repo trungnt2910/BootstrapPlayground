@@ -171,7 +171,7 @@ jobs:
             CC="$TARGET-clang" \
             AR="$TARGET-ar" \
             RANLIB="$TARGET-ranlib" \
-            CFLAGS="-O2 -DWIN32_LEAN_AND_MEAN -include windows.h"
+            CFLAGS="-O2 -DWIN32_LEAN_AND_MEAN -include windows.h -include wincon.h"
           make -j"$(nproc)"
           make install
           cd "$GITHUB_WORKSPACE"
