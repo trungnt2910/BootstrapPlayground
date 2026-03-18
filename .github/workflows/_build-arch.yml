@@ -167,6 +167,7 @@ jobs:
             --without-manpages \
             --without-progs \
             --without-tests \
+            ac_cv_func_putenv=yes \
             CC="$TARGET-clang" \
             AR="$TARGET-ar" \
             RANLIB="$TARGET-ranlib" \
