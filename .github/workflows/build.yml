@@ -24,28 +24,28 @@ jobs:
         run: |
           case "${{ matrix.arch }}" in
             x86)
-              echo "mingw_arch=i686"    >> "$GITHUB_OUTPUT"
-              echo "qemu_arch=i386"     >> "$GITHUB_OUTPUT"
-              echo "debian_arch=i386"   >> "$GITHUB_OUTPUT"
-              echo "wine_cmd=wine"      >> "$GITHUB_OUTPUT"
+              echo "mingw_arch=i686"      >> "$GITHUB_OUTPUT"
+              echo "qemu_arch=i386"       >> "$GITHUB_OUTPUT"
+              echo "debian_arch=i386"     >> "$GITHUB_OUTPUT"
+              echo "pwsh_arch=win-x86"    >> "$GITHUB_OUTPUT"
               ;;
             x64)
-              echo "mingw_arch=x86_64"  >> "$GITHUB_OUTPUT"
-              echo "qemu_arch=x86_64"   >> "$GITHUB_OUTPUT"
-              echo "debian_arch=amd64"  >> "$GITHUB_OUTPUT"
-              echo "wine_cmd=wine64"    >> "$GITHUB_OUTPUT"
+              echo "mingw_arch=x86_64"    >> "$GITHUB_OUTPUT"
+              echo "qemu_arch=x86_64"     >> "$GITHUB_OUTPUT"
+              echo "debian_arch=amd64"    >> "$GITHUB_OUTPUT"
+              echo "pwsh_arch=win-x64"    >> "$GITHUB_OUTPUT"
               ;;
             ARM)
-              echo "mingw_arch=armv7"   >> "$GITHUB_OUTPUT"
-              echo "qemu_arch=arm"      >> "$GITHUB_OUTPUT"
-              echo "debian_arch=armhf"  >> "$GITHUB_OUTPUT"
-              echo "wine_cmd=wine"      >> "$GITHUB_OUTPUT"
+              echo "mingw_arch=armv7"     >> "$GITHUB_OUTPUT"
+              echo "qemu_arch=arm"        >> "$GITHUB_OUTPUT"
+              echo "debian_arch=armhf"    >> "$GITHUB_OUTPUT"
+              echo "pwsh_arch=win-x86"    >> "$GITHUB_OUTPUT"
               ;;
             ARM64)
-              echo "mingw_arch=aarch64" >> "$GITHUB_OUTPUT"
-              echo "qemu_arch=aarch64"  >> "$GITHUB_OUTPUT"
-              echo "debian_arch=arm64"  >> "$GITHUB_OUTPUT"
-              echo "wine_cmd=wine"      >> "$GITHUB_OUTPUT"
+              echo "mingw_arch=aarch64"   >> "$GITHUB_OUTPUT"
+              echo "qemu_arch=aarch64"    >> "$GITHUB_OUTPUT"
+              echo "debian_arch=arm64"    >> "$GITHUB_OUTPUT"
+              echo "pwsh_arch=win-arm64"  >> "$GITHUB_OUTPUT"
               ;;
           esac
 
@@ -71,7 +71,7 @@ jobs:
         run: |
           TAG="${{ steps.llvm_release.outputs.tag }}"
           URL="https://github.com/mstorsjo/llvm-mingw/releases/download/${TAG}/llvm-mingw-${TAG}-ucrt-ubuntu-22.04-x86_64.tar.xz"
-          wget -q "$URL" -O llvm-mingw.tar.xz
+          curl -fL "$URL" -o llvm-mingw.tar.xz
           mkdir llvm-mingw
           tar -xf llvm-mingw.tar.xz --strip-components=1 -C llvm-mingw
           rm llvm-mingw.tar.xz
@@ -82,6 +82,35 @@ jobs:
         run: |
           export PATH="$PWD/llvm-mingw/bin:$PATH"
           "${{ steps.vars.outputs.mingw_arch }}-w64-mingw32-c++" -o hello.exe hello.cpp
+
+      # ── PowerShell for Windows ──────────────────────────────────────────────
+
+      - name: Get latest PowerShell release tag
+        id: pwsh_release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG=$(gh api repos/PowerShell/PowerShell/releases/latest --jq .tag_name)
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Cache PowerShell for Windows
+        id: cache_pwsh
+        uses: actions/cache@v4
+        with:
+          path: pwsh
+          key: pwsh-${{ steps.pwsh_release.outputs.tag }}-${{ steps.vars.outputs.pwsh_arch }}
+
+      - name: Download and extract PowerShell for Windows
+        if: steps.cache_pwsh.outputs.cache-hit != 'true'
+        run: |
+          TAG="${{ steps.pwsh_release.outputs.tag }}"
+          PWSH_ARCH="${{ steps.vars.outputs.pwsh_arch }}"
+          VERSION="${TAG#v}"
+          URL="https://github.com/PowerShell/PowerShell/releases/download/${TAG}/PowerShell-${VERSION}-${PWSH_ARCH}.zip"
+          curl -fL "$URL" -o pwsh.zip
+          mkdir pwsh
+          unzip -q pwsh.zip -d pwsh
+          rm pwsh.zip
 
       # ── QEMU + Debian chroot + WINE ─────────────────────────────────────────
 
@@ -95,13 +124,12 @@ jobs:
         uses: actions/cache@v4
         with:
           path: chroot.tar.zst
-          key: chroot-bookworm-${{ steps.vars.outputs.debian_arch }}-wine-v1
+          key: chroot-bookworm-${{ steps.vars.outputs.debian_arch }}-wine-v2
 
       - name: Create Debian chroot and install WINE
         if: steps.cache_chroot.outputs.cache-hit != 'true'
         run: |
           DEBIAN_ARCH="${{ steps.vars.outputs.debian_arch }}"
-          QEMU_ARCH="${{ steps.vars.outputs.qemu_arch }}"
 
           # Bootstrap a Debian bookworm root filesystem for the target arch.
           # qemu-debootstrap handles the QEMU-assisted second stage automatically
@@ -112,31 +140,19 @@ jobs:
             bookworm /chroot \
             http://deb.debian.org/debian
 
-          # Copy the current QEMU static binary into the chroot so that we can
-          # invoke it explicitly (satisfying "run under emulation even if the
-          # host matches the target architecture").
-          sudo cp /usr/bin/qemu-${QEMU_ARCH}-static /chroot/usr/bin/
+          # After qemu-debootstrap, binfmt_misc is registered on the host for
+          # every foreign architecture.  Chroot commands can be invoked directly
+          # without specifying the QEMU interpreter explicitly — the kernel
+          # dispatches foreign ELF binaries through binfmt_misc automatically.
+          sudo chroot /chroot apt-get update -q
 
           # Detect the latest Wine version available in the distro's repository.
-          sudo chroot /chroot apt-get update -q
-          WINE_VERSION=$(sudo chroot /chroot \
-            /usr/bin/qemu-${QEMU_ARCH}-static \
-            /usr/bin/apt-cache policy wine \
+          WINE_VERSION=$(sudo chroot /chroot apt-cache policy wine \
             | grep Candidate | awk '{print $2}')
           echo "Latest available Wine version for ${DEBIAN_ARCH}: ${WINE_VERSION}"
 
-          # Install Wine.  On amd64 we install wine64 directly (avoids the need
-          # to enable i386 multiarch for wine32).  On every other architecture
-          # the distro's 'wine' metapackage is the right choice.
-          if [ "$DEBIAN_ARCH" = "amd64" ]; then
-            sudo chroot /chroot \
-              /usr/bin/qemu-${QEMU_ARCH}-static \
-              /usr/bin/apt-get install -y wine64
-          else
-            sudo chroot /chroot \
-              /usr/bin/qemu-${QEMU_ARCH}-static \
-              /usr/bin/apt-get install -y wine
-          fi
+          # Install Wine.
+          sudo chroot /chroot apt-get install -y wine
 
           # Pack the chroot for caching (zstd for a good speed/size trade-off).
           sudo tar --zstd -cf chroot.tar.zst -C / chroot
@@ -146,27 +162,35 @@ jobs:
         run: |
           sudo tar --zstd -xf chroot.tar.zst -C /
 
-      # Always refresh the QEMU binary inside the chroot so that a stale cached
-      # copy never causes a version mismatch with the host binfmt registration.
-      - name: Refresh QEMU static binary inside chroot
-        run: |
-          QEMU_ARCH="${{ steps.vars.outputs.qemu_arch }}"
-          sudo cp /usr/bin/qemu-${QEMU_ARCH}-static /chroot/usr/bin/
-
       # ── Run under emulation ─────────────────────────────────────────────────
 
-      - name: Run hello.exe under WINE via QEMU (${{ matrix.arch }})
+      - name: Run hello.exe via PowerShell on WINE (${{ matrix.arch }})
         run: |
-          QEMU_ARCH="${{ steps.vars.outputs.qemu_arch }}"
-          WINE_CMD="${{ steps.vars.outputs.wine_cmd }}"
           sudo cp hello.exe /chroot/hello.exe
-          # Explicitly invoke the QEMU static binary so that execution goes
-          # through software emulation even when the host arch matches the
-          # target (e.g. x64 build on an x86_64 runner).
+          sudo cp hello.ps1 /chroot/hello.ps1
+          sudo cp -r pwsh    /chroot/pwsh
+
+          # Bind-mount /proc, /dev, and /sys so that Wine's wineserver and
+          # .NET CoreCLR (PowerShell's runtime) can access kernel interfaces.
+          sudo mount --bind /proc /chroot/proc
+          sudo mount --bind /dev  /chroot/dev
+          sudo mount --bind /sys  /chroot/sys
+          trap 'sudo umount /chroot/sys  2>/dev/null || true
+                sudo umount /chroot/dev  2>/dev/null || true
+                sudo umount /chroot/proc 2>/dev/null || true' EXIT
+
+          # For non-x64 architectures, binfmt_misc transparently routes the
+          # Wine ELF binary through the appropriate qemu-<arch>-static.
+          # For x64, Wine runs natively since the runner is also x86_64.
+          # Invoking Wine via binfmt_misc (rather than calling qemu-static
+          # explicitly) is required: explicit invocation conflicts with Wine's
+          # preloader memory-reservation mechanism, causing ntdll.so to fail.
+          #
+          # ARM uses win-x86 PowerShell — Wine on ARM32 includes a built-in
+          # x86 CPU emulator that allows it to run x86 Windows PE binaries.
           sudo chroot /chroot \
-            /usr/bin/qemu-${QEMU_ARCH}-static \
-            /usr/bin/env HOME=/tmp WINEDEBUG=-all \
-            /usr/bin/${WINE_CMD} /hello.exe
+            env HOME=/tmp WINEDEBUG=-all \
+            wine /pwsh/pwsh.exe -NonInteractive -File 'Z:\hello.ps1'
 
       # ── Artifact upload ─────────────────────────────────────────────────────
 
@@ -196,7 +220,7 @@ jobs:
         with:
           path: artifacts
 
-      - name: Organise binaries into Windows-style architecture subfolders
+      - name: Organize binaries into Windows-style architecture subfolders
         run: |
           for ARCH in x86 x64 ARM ARM64; do
             mkdir -p "release/$ARCH"
