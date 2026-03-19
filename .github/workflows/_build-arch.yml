@@ -146,22 +146,25 @@ jobs:
         run: |
           sudo cp hello.exe /chroot/hello.exe
 
-          # Locate the real wine ELF binary in the chroot from the host
-          # filesystem.  Debian's wine package installs the binary under
-          # /usr/lib/<triple>/wine/bin/ and registers it via update-alternatives
-          # as /usr/bin/wine[64].  During debootstrap, /proc is not yet mounted
-          # so update-alternatives may not create the /usr/bin symlink.
-          # Running the ELF directly from /usr/lib bypasses that dependency.
+          # Locate the wine ELF binary inside the chroot.
+          # On Debian Bookworm, wine[64] is a real ELF installed at /usr/bin/.
+          # Resolve any symlinks from the host so that WINELOADER points at an
+          # actual file — if realpath() returns NULL (e.g. a dangling alternatives
+          # link), Wine cannot locate ntdll.so.
           WINE_NAME="wine"
           [ "${{ steps.vars.outputs.wine_arch }}" = "win64" ] && WINE_NAME="wine64"
-          WINE_ELF_HOST=$(find /chroot/usr/lib -type f -name "$WINE_NAME" \
-                            -path '*/wine/bin/*' 2>/dev/null | head -1)
+          WINE_ELF_HOST=$(readlink -f "/chroot/usr/bin/$WINE_NAME" 2>/dev/null)
+          if [ -z "$WINE_ELF_HOST" ] || [ ! -f "$WINE_ELF_HOST" ]; then
+            # Fallback: search anywhere under /usr (handles non-standard layouts).
+            WINE_ELF_HOST=$(find /chroot/usr -type f -name "$WINE_NAME" \
+                              ! -path '*/share/*' 2>/dev/null | head -1)
+          fi
           if [ -z "$WINE_ELF_HOST" ]; then
             echo "ERROR: Could not find $WINE_NAME binary in chroot" >&2
             exit 1
           fi
           WINE_ELF_PATH="${WINE_ELF_HOST#/chroot}"
-          echo "Detected wine ELF: $WINE_ELF_PATH"
+          echo "Detected wine binary: $WINE_ELF_PATH"
 
           # Bind-mount /proc and /dev so that Wine's wineserver can access
           # kernel interfaces (e.g. /proc/self/fd, /dev/urandom).
@@ -178,12 +181,13 @@ jobs:
           # within the emulated process and re-route them back through qemu-static,
           # preventing any Linux ELF from escaping the QEMU sandbox.
           #
-          # WINELOADER is set to the chroot-relative path of the real wine ELF
-          # (e.g. /usr/lib/i386-linux-gnu/wine/bin/wine).  Under binfmt_misc+QEMU,
-          # /proc/self/exe points to the QEMU interpreter, not the wine binary.
-          # Wine falls back to WINELOADER to locate its install tree and compute
-          # the DLL directory for loading ntdll.so.  Pointing it at the actual ELF
-          # (not a /usr/bin symlink) ensures realpath() succeeds inside the chroot.
+          # WINELOADER is set to the chroot-relative path of the wine ELF
+          # (e.g. /usr/bin/wine on i386, /usr/bin/wine64 on amd64/arm64).
+          # Under binfmt_misc+QEMU, /proc/self/exe points to the QEMU interpreter,
+          # not the wine binary.  Wine falls back to WINELOADER to locate its
+          # install tree and compute the DLL directory for loading ntdll.so.
+          # The path must resolve cleanly via realpath() inside the chroot;
+          # a dangling symlink causes realpath() to return NULL and Wine to fail.
           #
           # WINEARCH restricts the Wine prefix to a single bitness: win32 for
           # 32-bit targets, win64 for 64-bit targets.  Without this, wine64 would
