@@ -23,28 +23,28 @@ jobs:
         run: |
           case "${{ inputs.arch }}" in
             x86)
-              echo "mingw_arch=i686"                    >> "$GITHUB_OUTPUT"
-              echo "debian_arch=i386"                   >> "$GITHUB_OUTPUT"
-              echo "debian_multiarch=i386-linux-gnu"    >> "$GITHUB_OUTPUT"
-              echo "wine_arch=win32"                    >> "$GITHUB_OUTPUT"
+              echo "mingw_arch=i686"                       >> "$GITHUB_OUTPUT"
+              echo "debian_arch=i386"                      >> "$GITHUB_OUTPUT"
+              echo "debian_multiarch=i386-linux-gnu"       >> "$GITHUB_OUTPUT"
+              echo "wine_arch=win32"                       >> "$GITHUB_OUTPUT"
               ;;
             x64)
-              echo "mingw_arch=x86_64"                  >> "$GITHUB_OUTPUT"
-              echo "debian_arch=amd64"                  >> "$GITHUB_OUTPUT"
-              echo "debian_multiarch=x86_64-linux-gnu"  >> "$GITHUB_OUTPUT"
-              echo "wine_arch=win64"                    >> "$GITHUB_OUTPUT"
+              echo "mingw_arch=x86_64"                     >> "$GITHUB_OUTPUT"
+              echo "debian_arch=amd64"                     >> "$GITHUB_OUTPUT"
+              echo "debian_multiarch=x86_64-linux-gnu"     >> "$GITHUB_OUTPUT"
+              echo "wine_arch=win64"                       >> "$GITHUB_OUTPUT"
               ;;
             ARM)
-              echo "mingw_arch=armv7"                       >> "$GITHUB_OUTPUT"
-              echo "debian_arch=armhf"                      >> "$GITHUB_OUTPUT"
-              echo "debian_multiarch=arm-linux-gnueabihf"   >> "$GITHUB_OUTPUT"
-              echo "wine_arch=win32"                        >> "$GITHUB_OUTPUT"
+              echo "mingw_arch=armv7"                      >> "$GITHUB_OUTPUT"
+              echo "debian_arch=armhf"                     >> "$GITHUB_OUTPUT"
+              echo "debian_multiarch=arm-linux-gnueabihf"  >> "$GITHUB_OUTPUT"
+              echo "wine_arch=win32"                       >> "$GITHUB_OUTPUT"
               ;;
             ARM64)
-              echo "mingw_arch=aarch64"                     >> "$GITHUB_OUTPUT"
-              echo "debian_arch=arm64"                      >> "$GITHUB_OUTPUT"
-              echo "debian_multiarch=aarch64-linux-gnu"     >> "$GITHUB_OUTPUT"
-              echo "wine_arch=win64"                        >> "$GITHUB_OUTPUT"
+              echo "mingw_arch=aarch64"                    >> "$GITHUB_OUTPUT"
+              echo "debian_arch=arm64"                     >> "$GITHUB_OUTPUT"
+              echo "debian_multiarch=aarch64-linux-gnu"    >> "$GITHUB_OUTPUT"
+              echo "wine_arch=win64"                       >> "$GITHUB_OUTPUT"
               ;;
           esac
 

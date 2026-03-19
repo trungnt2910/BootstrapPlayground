@@ -8,7 +8,7 @@ A playground for cross-compiling Windows binaries with [llvm-mingw](https://gith
 ## What it does
 
 1. **Cross-compiles** a simple "Hello World!" C++ program for Windows (x86, x64, ARM, ARM64) using the latest stable llvm-mingw toolchain.
-2. **Runs** each binary under WINE inside an architecture-matched Debian chroot, using QEMU user-mode emulation.
+2. **Runs** each binary under WINE inside an architecture-matched Debian rootfs, using QEMU user-mode emulation.
 3. **Releases** all four binaries as a versioned ZIP (`YYYYMMDD.XX`) on every successful `master` push.
 
 ## CI/CD overview
@@ -16,8 +16,8 @@ A playground for cross-compiling Windows binaries with [llvm-mingw](https://gith
 | Step | Tool |
 |------|------|
 | Cross-compilation | [llvm-mingw](https://github.com/mstorsjo/llvm-mingw) (UCRT, Ubuntu toolchain) |
-| Target environment | Debian bookworm chroot via `qemu-debootstrap` |
-| Architecture emulation | `qemu-user-static` (explicit invocation, all arches) |
+| Target environment | Debian bookworm rootfs via `qemu-debootstrap` |
+| Architecture emulation | `qemu-user-static` via `binfmt_misc` (F flag) |
 | Windows emulation | WINE (from Debian bookworm repositories) |
 | Release versioning | `YYYYMMDD.XX` determined via GitHub API |
 
