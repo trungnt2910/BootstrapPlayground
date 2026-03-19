@@ -16,7 +16,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Set up architecture variables
         id: vars
@@ -60,7 +60,7 @@ jobs:
 
       - name: Cache llvm-mingw toolchain
         id: cache_llvm
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: llvm-mingw
           key: llvm-mingw-${{ steps.llvm_release.outputs.tag }}-ucrt-ubuntu-x86_64
@@ -103,7 +103,7 @@ jobs:
 
       - name: Cache Debian bookworm chroot with WINE
         id: cache_chroot
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: chroot.tar.zst
           key: chroot-bookworm-${{ steps.vars.outputs.debian_arch }}-wine
@@ -190,7 +190,7 @@ jobs:
 
       - name: Upload binary artifact
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: hello-${{ inputs.arch }}
           path: hello.exe
