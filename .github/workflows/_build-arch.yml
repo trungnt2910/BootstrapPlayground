@@ -92,7 +92,7 @@ jobs:
           # Use clang++ explicitly to ensure llvm-mingw's clang is the compiler,
           # not the system gcc that the generic c++ wrapper might resolve to.
           "${{ steps.vars.outputs.mingw_arch }}-w64-mingw32-clang++" \
-            -o hello.exe hello.cpp
+            -static -o hello.exe hello.cpp
 
       # ── QEMU + Debian chroot + WINE ─────────────────────────────────────────
 
