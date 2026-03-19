@@ -125,7 +125,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: bash.exe
-          key: bash-${{ steps.bash_release.outputs.version }}-ncurses-${{ steps.ncurses_release.outputs.version }}-${{ inputs.arch }}-llvm-mingw-v5
+          key: bash-${{ steps.bash_release.outputs.version }}-ncurses-${{ steps.ncurses_release.outputs.version }}-${{ inputs.arch }}-llvm-mingw-v6
 
       - name: Build statically-linked Bash for Windows (${{ inputs.arch }})
         if: steps.cache_bash.outputs.cache-hit != 'true'
@@ -221,17 +221,31 @@ jobs:
           # variable names instead.  Using ac_cv_type_clock_t=yes or
           # ac_cv_type_sigset_t=yes has no effect on BASH_CHECK_TYPE.
           #
-          # sigset_t cross-compilation fix: bash 5.3 added unconditional
-          # declarations in sig.h (outside any HAVE_POSIX_SIGNALS guard) that
-          # reference sigset_t, and kill_shell() in sig.c uses sigset_t
-          # unconditionally.  MinGW-w64 provides _sigset_t (unsigned long) but
-          # not sigset_t.  bash_cv_type_sigset_t=yes prevents config.h from
-          # emitting "#define sigset_t int" (which would conflict with glibc's
-          # typedef when HOST build tools include config.h alongside glibc
-          # headers).  CFLAGS="-Dsigset_t=_sigset_t" then provides sigset_t for
-          # the CROSS-compiled targets only: CFLAGS is used in Makefile's CCFLAGS
-          # (for the target binary) but NOT in CCFLAGS_FOR_BUILD (for the host
-          # build tools), so the glibc typedef is never affected.
+          # POSIX type availability in llvm-mingw's MinGW-w64 headers:
+          # - uid_t and gid_t are NOT defined in llvm-mingw's sys/types.h; setting
+          #   ac_cv_type_uid_t=yes prevents config.h from emitting a conflicting
+          #   "#define uid_t int" for glibc host tools, while CFLAGS="-Duid_t=int
+          #   -Dgid_t=int" provides these types for the cross-compiled target binary.
+          #   CFLAGS is used in Makefile's CCFLAGS (cross-compiled target) but NOT
+          #   in CCFLAGS_FOR_BUILD (host tools), so glibc's typedef is unaffected.
+          # - sigset_t uses the same pattern: bash_cv_type_sigset_t=yes suppresses
+          #   the config.h macro; CFLAGS="-Dsigset_t=_sigset_t" maps to MinGW-w64's
+          #   _sigset_t (unsigned long) in cross-compiled code only.
+          #
+          # POSIX signal functions: llvm-mingw's MinGW-w64 lacks sigjmp_buf,
+          # sigsetjmp, and siglongjmp.  bash_cv_func_sigsetjmp=absent prevents
+          # HAVE_SIGSETJMP, and bash_cv_signal_vintage=v7 prevents HAVE_POSIX_SIGNALS;
+          # both are needed because posixjmp.h uses sigjmp_buf when either is set.
+          # With both cleared, procenv_t maps to jmp_buf (which MinGW-w64 has).
+          #
+          # struct stat: MinGW-w64's struct stat does not have st_blocks (a POSIX
+          # extension).  ac_cv_member_struct_stat_st_blocks=no prevents bash from
+          # accessing that field.
+          #
+          # locale.h: llvm-mingw's locale.h and wchar.h both declare _wcreate_locale
+          # with different calling-convention attributes, causing a "conflicting types"
+          # hard error in clang.  ac_cv_header_locale_h=no suppresses the inclusion;
+          # combined with --disable-nls this has no functional impact.
           curl -fL "https://ftp.gnu.org/gnu/bash/bash-${BASH_VER}.tar.gz" \
             -o bash.tar.gz
           tar -xf bash.tar.gz
@@ -248,13 +262,13 @@ jobs:
             --disable-nls \
             bash_cv_have_mbstate_t=yes \
             bash_cv_getcwd_malloc=yes \
-            bash_cv_func_sigsetjmp=present \
+            bash_cv_func_sigsetjmp=absent \
             bash_cv_opendir_not_robust=yes \
             bash_cv_ulimit_maxfds=yes \
             bash_cv_must_reinstall_sighandlers=no \
             bash_cv_job_control_missing=missing \
             bash_cv_sys_named_pipes=missing \
-            bash_cv_have_posix_signals=no \
+            bash_cv_signal_vintage=v7 \
             bash_cv_type_clock_t=yes \
             bash_cv_type_sigset_t=yes \
             ac_cv_type_u_int=yes \
@@ -270,13 +284,15 @@ jobs:
             ac_cv_type_nlink_t=yes \
             ac_cv_type_off_t=yes \
             ac_cv_type_time_t=yes \
+            ac_cv_member_struct_stat_st_blocks=no \
+            ac_cv_header_locale_h=no \
             CC="$TARGET-clang" \
             AR="$TARGET-ar" \
             RANLIB="$TARGET-ranlib" \
             CC_FOR_BUILD=gcc \
             CPPFLAGS="-I${SYSROOT}/include" \
             LDFLAGS="-L${SYSROOT}/lib -static" \
-            CFLAGS="-O2 -Dsigset_t=_sigset_t"
+            CFLAGS="-O2 -Dsigset_t=_sigset_t -Duid_t=int -Dgid_t=int"
 
           make -j"$(nproc)"
           cp bash.exe "$GITHUB_WORKSPACE/bash.exe"
