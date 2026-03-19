@@ -86,220 +86,6 @@ jobs:
           "${{ steps.vars.outputs.mingw_arch }}-w64-mingw32-clang++" \
             -o hello.exe hello.cpp
 
-      # ── Build statically-linked Bash for Windows ────────────────────────────
-      #
-      # Bash is cross-compiled with llvm-mingw (clang) and linked fully
-      # statically.  ncurses is cross-compiled first as a static library to
-      # provide full readline support (command-line editing, history, tab
-      # completion) — useful for interactive debugging inside Wine.
-      #
-      # The build is cached per architecture and bash version; only bash.exe
-      # is kept (not the source or object trees).
-
-      - name: Get latest Bash release version
-        id: bash_release
-        run: |
-          VER=$(curl -fsSL "https://ftp.gnu.org/gnu/bash/" \
-            | grep -oP 'bash-\K[0-9]+\.[0-9]+(?:\.[0-9]+)?' \
-            | sort -V | tail -1)
-          if [ -z "$VER" ]; then
-            echo "ERROR: could not determine latest bash version from GNU FTP" >&2
-            exit 1
-          fi
-          echo "version=$VER" >> "$GITHUB_OUTPUT"
-
-      - name: Get latest ncurses release version
-        id: ncurses_release
-        run: |
-          VER=$(curl -fsSL "https://ftp.gnu.org/gnu/ncurses/" \
-            | grep -oP 'ncurses-\K[0-9]+\.[0-9]+(?:\.[0-9]+)?' \
-            | sort -V | tail -1)
-          if [ -z "$VER" ]; then
-            echo "ERROR: could not determine latest ncurses version from GNU FTP" >&2
-            exit 1
-          fi
-          echo "version=$VER" >> "$GITHUB_OUTPUT"
-
-      - name: Cache Bash for Windows (${{ inputs.arch }})
-        id: cache_bash
-        uses: actions/cache@v4
-        with:
-          path: bash.exe
-          key: bash-${{ steps.bash_release.outputs.version }}-ncurses-${{ steps.ncurses_release.outputs.version }}-${{ inputs.arch }}-llvm-mingw-v6
-
-      - name: Build statically-linked Bash for Windows (${{ inputs.arch }})
-        if: steps.cache_bash.outputs.cache-hit != 'true'
-        run: |
-          TARGET="${{ steps.vars.outputs.mingw_arch }}-w64-mingw32"
-          export PATH="$PWD/llvm-mingw/bin:$PATH"
-          BASH_VER="${{ steps.bash_release.outputs.version }}"
-          SYSROOT="$PWD/deps"
-          mkdir -p "$SYSROOT"
-
-          # ── ncurses (terminal support for readline) ──────────────────────────
-          # ncurses is cross-compiled for the Windows target and installed into
-          # a local sysroot as a static library.
-          #
-          # The Win32 console driver (lib_win32con.c) requires KEY_EVENT and
-          # other types from wincon.h, but ncurses's own configure adds
-          # -DWIN32_LEAN_AND_MEAN globally (via CF_WITH_WINCON), which prevents
-          # windows.h from pulling in wincon.h.  Rather than fighting that with
-          # command-line -U/-include flags (which ncurses's Makefile reorders),
-          # the root-cause fix is to pre-seed the configure check result:
-          #
-          #   ac_cv_header_wincon_h=no
-          #
-          # With this cache variable, configure believes wincon.h is unavailable,
-          # so CF_WITH_WINCON sets cf_with_wincon=no and never adds
-          # -DWIN32_LEAN_AND_MEAN or USE_WIN32CON_DRIVER to the build flags.
-          # ncurses then uses the generic term-driver path (USE_TERM_DRIVER is
-          # still defined), which is backed by the terminfo driver at runtime.
-          # Under Wine the terminfo driver works correctly because Wine exposes
-          # POSIX-compatible terminal APIs (isatty, tcgetattr, etc.).
-          #
-          # ac_cv_func_putenv=yes pre-seeds the putenv probe (MinGW-w64
-          # provides putenv; cross-compile cannot run the test binary).
-          #
-          # --with-build-cc=gcc compiles the host-side ncurses build tools
-          # (e.g. the terminfo compiler tic) with the host gcc rather than the
-          # cross-compiler.
-          NCURSES_VER="${{ steps.ncurses_release.outputs.version }}"
-          curl -fL "https://ftp.gnu.org/gnu/ncurses/ncurses-${NCURSES_VER}.tar.gz" \
-            -o ncurses.tar.gz
-          tar -xf ncurses.tar.gz
-          mkdir ncurses-build
-          cd ncurses-build
-          "../ncurses-${NCURSES_VER}/configure" \
-            --host="$TARGET" \
-            --build=x86_64-linux-gnu \
-            --prefix="$SYSROOT" \
-            --with-build-cc=gcc \
-            --without-ada \
-            --without-cxx \
-            --without-cxx-binding \
-            --enable-static \
-            --disable-shared \
-            --with-normal \
-            --without-debug \
-            --without-manpages \
-            --without-progs \
-            --without-tests \
-            ac_cv_func_putenv=yes \
-            ac_cv_header_wincon_h=no \
-            CC="$TARGET-clang" \
-            AR="$TARGET-ar" \
-            RANLIB="$TARGET-ranlib" \
-            CFLAGS="-O2"
-          make -j"$(nproc)"
-          make install
-          cd "$GITHUB_WORKSPACE"
-          rm -rf "ncurses-${NCURSES_VER}" ncurses-build ncurses.tar.gz
-
-          # ── bash ─────────────────────────────────────────────────────────────
-          # bash is configured with its bundled readline library using the static
-          # ncurses above for terminal I/O.  All standard interactive features
-          # (history, aliases, completion, pushd/popd, prompt decoding) are
-          # enabled; only NLS and job control are disabled, as those cannot
-          # work meaningfully on Windows.
-          #
-          # Cross-compilation type fix: bash's configure cannot run test binaries
-          # on the host, so for any POSIX type it cannot probe it falls back to
-          # emitting "#define uid_t int" (etc.) into config.h.  Those macros are
-          # later included by HOST-compiled build utilities (mksignames, mksyntax,
-          # …); when glibc also typedefs the same name (e.g.
-          # "typedef __uid_t uid_t"), the preprocessor expands the macro and
-          # produces "typedef unsigned int int", triggering "two or more data
-          # types in declaration specifiers".
-          #
-          # Root-cause fix: pre-seed autoconf cache variables so configure skips
-          # the type probes and emits no conflicting #define macros into config.h.
-          #
-          # Variable naming: most POSIX types in bash 5.3 are checked with the
-          # standard AC_TYPE_* or AC_CHECK_TYPE macros, which use ac_cv_type_*
-          # cache variable names.  However, clock_t and sigset_t are checked with
-          # bash's own BASH_CHECK_TYPE macro (aclocal.m4), which uses bash_cv_type_*
-          # variable names instead.  Using ac_cv_type_clock_t=yes or
-          # ac_cv_type_sigset_t=yes has no effect on BASH_CHECK_TYPE.
-          #
-          # POSIX type availability in llvm-mingw's MinGW-w64 headers:
-          # - uid_t and gid_t are NOT defined in llvm-mingw's sys/types.h; setting
-          #   ac_cv_type_uid_t=yes prevents config.h from emitting a conflicting
-          #   "#define uid_t int" for glibc host tools, while CFLAGS="-Duid_t=int
-          #   -Dgid_t=int" provides these types for the cross-compiled target binary.
-          #   CFLAGS is used in Makefile's CCFLAGS (cross-compiled target) but NOT
-          #   in CCFLAGS_FOR_BUILD (host tools), so glibc's typedef is unaffected.
-          # - sigset_t uses the same pattern: bash_cv_type_sigset_t=yes suppresses
-          #   the config.h macro; CFLAGS="-Dsigset_t=_sigset_t" maps to MinGW-w64's
-          #   _sigset_t (unsigned long) in cross-compiled code only.
-          #
-          # POSIX signal functions: llvm-mingw's MinGW-w64 lacks sigjmp_buf,
-          # sigsetjmp, and siglongjmp.  bash_cv_func_sigsetjmp=absent prevents
-          # HAVE_SIGSETJMP, and bash_cv_signal_vintage=v7 prevents HAVE_POSIX_SIGNALS;
-          # both are needed because posixjmp.h uses sigjmp_buf when either is set.
-          # With both cleared, procenv_t maps to jmp_buf (which MinGW-w64 has).
-          #
-          # struct stat: MinGW-w64's struct stat does not have st_blocks (a POSIX
-          # extension).  ac_cv_member_struct_stat_st_blocks=no prevents bash from
-          # accessing that field.
-          #
-          # locale.h: llvm-mingw's locale.h and wchar.h both declare _wcreate_locale
-          # with different calling-convention attributes, causing a "conflicting types"
-          # hard error in clang.  ac_cv_header_locale_h=no suppresses the inclusion;
-          # combined with --disable-nls this has no functional impact.
-          curl -fL "https://ftp.gnu.org/gnu/bash/bash-${BASH_VER}.tar.gz" \
-            -o bash.tar.gz
-          tar -xf bash.tar.gz
-          cd "bash-${BASH_VER}"
-
-          # CC must be set explicitly so configure uses llvm-mingw's clang
-          # rather than the system gcc for cross-compilation.
-          # CC_FOR_BUILD stays as gcc (the host compiler) for build-side tools.
-          ./configure \
-            --host="$TARGET" \
-            --build=x86_64-linux-gnu \
-            --without-bash-malloc \
-            --with-curses \
-            --disable-nls \
-            bash_cv_have_mbstate_t=yes \
-            bash_cv_getcwd_malloc=yes \
-            bash_cv_func_sigsetjmp=absent \
-            bash_cv_opendir_not_robust=yes \
-            bash_cv_ulimit_maxfds=yes \
-            bash_cv_must_reinstall_sighandlers=no \
-            bash_cv_job_control_missing=missing \
-            bash_cv_sys_named_pipes=missing \
-            bash_cv_signal_vintage=v7 \
-            bash_cv_type_clock_t=yes \
-            bash_cv_type_sigset_t=yes \
-            ac_cv_type_u_int=yes \
-            ac_cv_type_u_long=yes \
-            ac_cv_type_u_short=yes \
-            ac_cv_type_u_char=yes \
-            ac_cv_type_uid_t=yes \
-            ac_cv_type_gid_t=yes \
-            ac_cv_type_pid_t=yes \
-            ac_cv_type_mode_t=yes \
-            ac_cv_type_dev_t=yes \
-            ac_cv_type_ino_t=yes \
-            ac_cv_type_nlink_t=yes \
-            ac_cv_type_off_t=yes \
-            ac_cv_type_time_t=yes \
-            ac_cv_member_struct_stat_st_blocks=no \
-            ac_cv_header_locale_h=no \
-            CC="$TARGET-clang" \
-            AR="$TARGET-ar" \
-            RANLIB="$TARGET-ranlib" \
-            CC_FOR_BUILD=gcc \
-            CPPFLAGS="-I${SYSROOT}/include" \
-            LDFLAGS="-L${SYSROOT}/lib -static" \
-            CFLAGS="-O2 -Dsigset_t=_sigset_t -Duid_t=int -Dgid_t=int"
-
-          make -j"$(nproc)"
-          cp bash.exe "$GITHUB_WORKSPACE/bash.exe"
-          cd "$GITHUB_WORKSPACE"
-          rm -rf "bash-${BASH_VER}" bash.tar.gz deps
-
-
       # ── QEMU + Debian chroot + WINE ─────────────────────────────────────────
 
       - name: Install QEMU user-mode emulation and debootstrap
@@ -352,11 +138,9 @@ jobs:
 
       # ── Run under emulation ─────────────────────────────────────────────────
 
-      - name: Run hello.sh via bash.exe on WINE (${{ inputs.arch }})
+      - name: Run hello.exe on WINE (${{ inputs.arch }})
         run: |
           sudo cp hello.exe /chroot/hello.exe
-          sudo cp bash.exe  /chroot/bash.exe
-          sudo cp hello.sh  /chroot/hello.sh
 
           # Bind-mount /proc and /dev so that Wine's wineserver can access
           # kernel interfaces (e.g. /proc/self/fd, /dev/urandom).
@@ -373,13 +157,11 @@ jobs:
           # within the emulated process and re-route them back through qemu-static,
           # preventing any Linux ELF from escaping the QEMU sandbox.
           #
-          # hello.exe is a Windows PE binary launched by bash.exe via the Win32
-          # CreateProcess() API, which Wine handles internally — no Linux execve()
-          # is issued for PE files, so hello.exe never leaves the Wine API-
-          # translation layer.
+          # hello.exe is a Windows PE binary; Wine handles it via the Win32
+          # CreateProcess() API — no Linux execve() is issued for PE files.
           sudo chroot /chroot \
             env HOME=/tmp WINEDEBUG=-all QEMU_EXECVE=1 \
-            wine /bash.exe Z:/hello.sh
+            wine /hello.exe
 
       # ── Artifact upload ─────────────────────────────────────────────────────
 
