@@ -106,7 +106,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: chroot.tar.zst
-          key: chroot-bookworm-${{ steps.vars.outputs.debian_arch }}-wine-v4
+          key: chroot-bookworm-${{ steps.vars.outputs.debian_arch }}-wine-v5
 
       - name: Create Debian chroot and install WINE
         if: steps.cache_chroot.outputs.cache-hit != 'true'
@@ -215,14 +215,32 @@ jobs:
           # 32-bit targets, win64 for 64-bit targets.  Without this, wine64 would
           # attempt to create a WoW64 (mixed 32+64-bit) prefix, which requires
           # wine32 libraries not present in a pure 64-bit chroot.
-          #
+
+          # Step 1: Warm-up run to initialize the Wine prefix.
+          # On the very first run Wine runs wineboot.exe internally to set up the
+          # Windows registry and virtual filesystem.  After initialization,
+          # wineboot exits with code 53 ("configuration updated / reboot
+          # required") and Wine exits without running the requested program.
+          # We tolerate any exit code here; the purpose is only to populate the
+          # prefix so the real run below can skip initialization entirely.
+          sudo chroot /chroot \
+            env HOME=/tmp WINEDEBUG=-all QEMU_EXECVE=1 \
+                WINELOADER="${WINE_ELF}" \
+                WINEARCH=${{ steps.vars.outputs.wine_arch }} \
+            "${WINE_CMD}" /hello.exe 2>&1 | head -20 || true
+
+          # Give wineserver time to notice that all clients have exited and
+          # shut down cleanly before we start a fresh Wine session.
+          sleep 2
+
+          # Step 2: Run hello.exe for real.
+          # The prefix is now fully initialized so Wine skips wineboot and
+          # executes hello.exe directly.
           # hello.exe is a Windows PE binary; Wine handles it via the Win32
           # CreateProcess() API — no Linux execve() is issued for PE files.
           sudo chroot /chroot \
             env HOME=/tmp WINEDEBUG=-all QEMU_EXECVE=1 \
                 WINELOADER="${WINE_ELF}" \
-                WINEDLLPATH="/usr/lib/${{ steps.vars.outputs.debian_multiarch }}/wine" \
-                WINEARCH=${{ steps.vars.outputs.wine_arch }} \
             "${WINE_CMD}" /hello.exe
 
       # ── Artifact upload ─────────────────────────────────────────────────────
