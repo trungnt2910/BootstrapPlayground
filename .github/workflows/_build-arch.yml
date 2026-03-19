@@ -125,7 +125,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: bash.exe
-          key: bash-${{ steps.bash_release.outputs.version }}-ncurses-${{ steps.ncurses_release.outputs.version }}-${{ inputs.arch }}-llvm-mingw-v4
+          key: bash-${{ steps.bash_release.outputs.version }}-ncurses-${{ steps.ncurses_release.outputs.version }}-${{ inputs.arch }}-llvm-mingw-v5
 
       - name: Build statically-linked Bash for Windows (${{ inputs.arch }})
         if: steps.cache_bash.outputs.cache-hit != 'true'
@@ -202,31 +202,36 @@ jobs:
           # enabled; only NLS and job control are disabled, as those cannot
           # work meaningfully on Windows.
           #
-          # Cross-compilation: bash's configure cannot run test binaries on the
-          # host, so it defaults to emitting "#define uid_t int" etc. in
-          # config.h for any POSIX type it cannot probe.  Those macros are then
-          # included by HOST-compiled build utilities (mksignames, mksyntax,
-          # …); when glibc later typedefs the same name (e.g.
+          # Cross-compilation type fix: bash's configure cannot run test binaries
+          # on the host, so for any POSIX type it cannot probe it falls back to
+          # emitting "#define uid_t int" (etc.) into config.h.  Those macros are
+          # later included by HOST-compiled build utilities (mksignames, mksyntax,
+          # …); when glibc also typedefs the same name (e.g.
           # "typedef __uid_t uid_t"), the preprocessor expands the macro and
           # produces "typedef unsigned int int", triggering "two or more data
           # types in declaration specifiers".
           #
-          # Root-cause fix: use autoconf's ac_cv_type_* cache variables to
-          # declare that every POSIX type of concern is already available on
-          # the target.  configure then skips the type checks and emits no
-          # conflicting #define macros into config.h.  The types are either
-          # provided by MinGW-w64's headers or never referenced in the
-          # Windows-relevant code paths, so supplying "yes" is safe.
+          # Root-cause fix: pre-seed autoconf cache variables so configure skips
+          # the type probes and emits no conflicting #define macros into config.h.
           #
-          # bash_cv_have_posix_signals=no: MinGW-w64 does not implement POSIX
-          # signal sets (sigset_t / sigaction / sigprocmask), so POSIX signal
-          # support is disabled.  bash 5.3 introduced sigset_t-based
-          # declarations in sig.h that are guarded by HAVE_POSIX_SIGNALS; with
-          # this set to no, those declarations are skipped and sigset_t is
-          # never referenced in the cross-compiled code.  ac_cv_type_sigset_t
-          # is also set to yes so configure does not emit "#define sigset_t int"
-          # into config.h (which would conflict with glibc's typedef in
-          # HOST-compiled build utilities).
+          # Variable naming: most POSIX types in bash 5.3 are checked with the
+          # standard AC_TYPE_* or AC_CHECK_TYPE macros, which use ac_cv_type_*
+          # cache variable names.  However, clock_t and sigset_t are checked with
+          # bash's own BASH_CHECK_TYPE macro (aclocal.m4), which uses bash_cv_type_*
+          # variable names instead.  Using ac_cv_type_clock_t=yes or
+          # ac_cv_type_sigset_t=yes has no effect on BASH_CHECK_TYPE.
+          #
+          # sigset_t cross-compilation fix: bash 5.3 added unconditional
+          # declarations in sig.h (outside any HAVE_POSIX_SIGNALS guard) that
+          # reference sigset_t, and kill_shell() in sig.c uses sigset_t
+          # unconditionally.  MinGW-w64 provides _sigset_t (unsigned long) but
+          # not sigset_t.  bash_cv_type_sigset_t=yes prevents config.h from
+          # emitting "#define sigset_t int" (which would conflict with glibc's
+          # typedef when HOST build tools include config.h alongside glibc
+          # headers).  CFLAGS="-Dsigset_t=_sigset_t" then provides sigset_t for
+          # the CROSS-compiled targets only: CFLAGS is used in Makefile's CCFLAGS
+          # (for the target binary) but NOT in CCFLAGS_FOR_BUILD (for the host
+          # build tools), so the glibc typedef is never affected.
           curl -fL "https://ftp.gnu.org/gnu/bash/bash-${BASH_VER}.tar.gz" \
             -o bash.tar.gz
           tar -xf bash.tar.gz
@@ -250,14 +255,14 @@ jobs:
             bash_cv_job_control_missing=missing \
             bash_cv_sys_named_pipes=missing \
             bash_cv_have_posix_signals=no \
-            ac_cv_type_sigset_t=yes \
+            bash_cv_type_clock_t=yes \
+            bash_cv_type_sigset_t=yes \
             ac_cv_type_u_int=yes \
             ac_cv_type_u_long=yes \
             ac_cv_type_u_short=yes \
             ac_cv_type_u_char=yes \
             ac_cv_type_uid_t=yes \
             ac_cv_type_gid_t=yes \
-            ac_cv_type_clock_t=yes \
             ac_cv_type_pid_t=yes \
             ac_cv_type_mode_t=yes \
             ac_cv_type_dev_t=yes \
@@ -271,12 +276,13 @@ jobs:
             CC_FOR_BUILD=gcc \
             CPPFLAGS="-I${SYSROOT}/include" \
             LDFLAGS="-L${SYSROOT}/lib -static" \
-            CFLAGS="-O2"
+            CFLAGS="-O2 -Dsigset_t=_sigset_t"
 
           make -j"$(nproc)"
           cp bash.exe "$GITHUB_WORKSPACE/bash.exe"
           cd "$GITHUB_WORKSPACE"
           rm -rf "bash-${BASH_VER}" bash.tar.gz deps
+
 
       # ── QEMU + Debian chroot + WINE ─────────────────────────────────────────
 
