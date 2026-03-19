@@ -217,6 +217,16 @@ jobs:
           # conflicting #define macros into config.h.  The types are either
           # provided by MinGW-w64's headers or never referenced in the
           # Windows-relevant code paths, so supplying "yes" is safe.
+          #
+          # bash_cv_have_posix_signals=no: MinGW-w64 does not implement POSIX
+          # signal sets (sigset_t / sigaction / sigprocmask), so POSIX signal
+          # support is disabled.  bash 5.3 introduced sigset_t-based
+          # declarations in sig.h that are guarded by HAVE_POSIX_SIGNALS; with
+          # this set to no, those declarations are skipped and sigset_t is
+          # never referenced in the cross-compiled code.  ac_cv_type_sigset_t
+          # is also set to yes so configure does not emit "#define sigset_t int"
+          # into config.h (which would conflict with glibc's typedef in
+          # HOST-compiled build utilities).
           curl -fL "https://ftp.gnu.org/gnu/bash/bash-${BASH_VER}.tar.gz" \
             -o bash.tar.gz
           tar -xf bash.tar.gz
@@ -239,6 +249,8 @@ jobs:
             bash_cv_must_reinstall_sighandlers=no \
             bash_cv_job_control_missing=missing \
             bash_cv_sys_named_pipes=missing \
+            bash_cv_have_posix_signals=no \
+            ac_cv_type_sigset_t=yes \
             ac_cv_type_u_int=yes \
             ac_cv_type_u_long=yes \
             ac_cv_type_u_short=yes \
