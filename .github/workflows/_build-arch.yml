@@ -23,20 +23,32 @@ jobs:
         run: |
           case "${{ inputs.arch }}" in
             x86)
-              echo "mingw_arch=i686"    >> "$GITHUB_OUTPUT"
-              echo "debian_arch=i386"   >> "$GITHUB_OUTPUT"
+              echo "mingw_arch=i686"          >> "$GITHUB_OUTPUT"
+              echo "debian_arch=i386"         >> "$GITHUB_OUTPUT"
+              echo "wine_cmd=wine"            >> "$GITHUB_OUTPUT"
+              echo "wine_loader=/usr/bin/wine" >> "$GITHUB_OUTPUT"
+              echo "wine_arch=win32"          >> "$GITHUB_OUTPUT"
               ;;
             x64)
-              echo "mingw_arch=x86_64"  >> "$GITHUB_OUTPUT"
-              echo "debian_arch=amd64"  >> "$GITHUB_OUTPUT"
+              echo "mingw_arch=x86_64"         >> "$GITHUB_OUTPUT"
+              echo "debian_arch=amd64"         >> "$GITHUB_OUTPUT"
+              echo "wine_cmd=wine64"           >> "$GITHUB_OUTPUT"
+              echo "wine_loader=/usr/bin/wine64" >> "$GITHUB_OUTPUT"
+              echo "wine_arch=win64"           >> "$GITHUB_OUTPUT"
               ;;
             ARM)
-              echo "mingw_arch=armv7"   >> "$GITHUB_OUTPUT"
-              echo "debian_arch=armhf"  >> "$GITHUB_OUTPUT"
+              echo "mingw_arch=armv7"          >> "$GITHUB_OUTPUT"
+              echo "debian_arch=armhf"         >> "$GITHUB_OUTPUT"
+              echo "wine_cmd=wine"             >> "$GITHUB_OUTPUT"
+              echo "wine_loader=/usr/bin/wine" >> "$GITHUB_OUTPUT"
+              echo "wine_arch=win32"           >> "$GITHUB_OUTPUT"
               ;;
             ARM64)
-              echo "mingw_arch=aarch64" >> "$GITHUB_OUTPUT"
-              echo "debian_arch=arm64"  >> "$GITHUB_OUTPUT"
+              echo "mingw_arch=aarch64"          >> "$GITHUB_OUTPUT"
+              echo "debian_arch=arm64"           >> "$GITHUB_OUTPUT"
+              echo "wine_cmd=wine64"             >> "$GITHUB_OUTPUT"
+              echo "wine_loader=/usr/bin/wine64" >> "$GITHUB_OUTPUT"
+              echo "wine_arch=win64"             >> "$GITHUB_OUTPUT"
               ;;
           esac
 
@@ -150,18 +162,32 @@ jobs:
                 sudo umount /chroot/proc 2>/dev/null || true' EXIT
 
           # binfmt_misc (F flag) transparently routes foreign-arch Wine ELF
-          # binaries through qemu-<arch>-static on exec().  For x64, Wine runs
-          # natively on the x86_64 runner.
+          # binaries through qemu-<arch>-static on exec(), regardless of the
+          # host machine's architecture.
           #
           # QEMU_EXECVE=1 instructs qemu-user to intercept execve(2) calls from
           # within the emulated process and re-route them back through qemu-static,
           # preventing any Linux ELF from escaping the QEMU sandbox.
           #
+          # WINELOADER must be set to the chroot-relative path of the Wine binary.
+          # When binfmt_misc F flag invokes QEMU, QEMU receives the host (real)
+          # path of the binary (e.g. /chroot/usr/bin/wine) as argv[0].  Inside
+          # the chroot, realpath() on that host-prefixed path fails, breaking
+          # Wine's lib-dir computation and causing ntdll.so to be unfindable.
+          # Setting WINELOADER to the chroot-relative path (/usr/bin/wine) lets
+          # Wine compute the correct library directory.
+          #
+          # WINEARCH=win64 for 64-bit targets prevents Wine from attempting to
+          # set up a WoW64 (32-bit subsystem) prefix, which would fail because
+          # the 64-bit Debian chroot does not include 32-bit Wine libraries.
+          #
           # hello.exe is a Windows PE binary; Wine handles it via the Win32
           # CreateProcess() API — no Linux execve() is issued for PE files.
           sudo chroot /chroot \
             env HOME=/tmp WINEDEBUG=-all QEMU_EXECVE=1 \
-            wine /hello.exe
+                WINELOADER=${{ steps.vars.outputs.wine_loader }} \
+                WINEARCH=${{ steps.vars.outputs.wine_arch }} \
+            ${{ steps.vars.outputs.wine_cmd }} /hello.exe
 
       # ── Artifact upload ─────────────────────────────────────────────────────
 
