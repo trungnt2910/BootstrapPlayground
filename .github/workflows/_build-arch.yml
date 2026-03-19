@@ -1,0 +1,197 @@
+name: Build (single arch)
+
+on:
+  workflow_call:
+    inputs:
+      arch:
+        description: 'Target architecture: x86, x64, ARM, or ARM64'
+        required: true
+        type: string
+
+jobs:
+  build:
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up architecture variables
+        id: vars
+        run: |
+          case "${{ inputs.arch }}" in
+            x86)
+              echo "mingw_arch=i686"                       >> "$GITHUB_OUTPUT"
+              echo "debian_arch=i386"                      >> "$GITHUB_OUTPUT"
+              echo "debian_multiarch=i386-linux-gnu"       >> "$GITHUB_OUTPUT"
+              echo "wine_arch=win32"                       >> "$GITHUB_OUTPUT"
+              ;;
+            x64)
+              echo "mingw_arch=x86_64"                     >> "$GITHUB_OUTPUT"
+              echo "debian_arch=amd64"                     >> "$GITHUB_OUTPUT"
+              echo "debian_multiarch=x86_64-linux-gnu"     >> "$GITHUB_OUTPUT"
+              echo "wine_arch=win64"                       >> "$GITHUB_OUTPUT"
+              ;;
+            ARM)
+              echo "mingw_arch=armv7"                      >> "$GITHUB_OUTPUT"
+              echo "debian_arch=armhf"                     >> "$GITHUB_OUTPUT"
+              echo "debian_multiarch=arm-linux-gnueabihf"  >> "$GITHUB_OUTPUT"
+              echo "wine_arch=win32"                       >> "$GITHUB_OUTPUT"
+              ;;
+            ARM64)
+              echo "mingw_arch=aarch64"                    >> "$GITHUB_OUTPUT"
+              echo "debian_arch=arm64"                     >> "$GITHUB_OUTPUT"
+              echo "debian_multiarch=aarch64-linux-gnu"    >> "$GITHUB_OUTPUT"
+              echo "wine_arch=win64"                       >> "$GITHUB_OUTPUT"
+              ;;
+          esac
+
+      # ── llvm-mingw toolchain ────────────────────────────────────────────────
+
+      - name: Get latest llvm-mingw release tag
+        id: llvm_release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG=$(gh api repos/mstorsjo/llvm-mingw/releases/latest --jq .tag_name)
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Cache llvm-mingw toolchain
+        id: cache_llvm
+        uses: actions/cache@v5
+        with:
+          path: llvm-mingw
+          key: llvm-mingw-${{ steps.llvm_release.outputs.tag }}-ucrt-ubuntu-x86_64
+
+      - name: Download and extract llvm-mingw
+        if: steps.cache_llvm.outputs.cache-hit != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ steps.llvm_release.outputs.tag }}"
+          # Select the UCRT Ubuntu x86_64 tarball.  When multiple Ubuntu versions
+          # are published for the same release, sort_by(.name) picks the oldest
+          # Ubuntu version first (e.g. ubuntu-20.04 before ubuntu-22.04) for
+          # maximum runner compatibility.
+          URL=$(gh api "repos/mstorsjo/llvm-mingw/releases/tags/${TAG}" \
+            --jq '[.assets[]
+                   | select(.name | test("ucrt-ubuntu-.*-x86_64\\.tar\\.xz$"))]
+                  | sort_by(.name) | .[0].browser_download_url')
+          curl -fL "$URL" -o llvm-mingw.tar.xz
+          mkdir llvm-mingw
+          tar -xf llvm-mingw.tar.xz --strip-components=1 -C llvm-mingw
+          rm llvm-mingw.tar.xz
+
+      # ── Cross-compile hello.exe ─────────────────────────────────────────────
+
+      - name: Cross-compile hello.exe for ${{ inputs.arch }}
+        run: |
+          export PATH="$PWD/llvm-mingw/bin:$PATH"
+          # Use clang++ explicitly to ensure llvm-mingw's clang is the compiler,
+          # not the system gcc that the generic c++ wrapper might resolve to.
+          "${{ steps.vars.outputs.mingw_arch }}-w64-mingw32-clang++" \
+            -static -o hello.exe hello.cpp
+
+      # ── QEMU + Debian chroot + WINE ─────────────────────────────────────────
+
+      - name: Install QEMU user-mode emulation and debootstrap
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y qemu-user-static binfmt-support debootstrap
+
+      - name: Cache Debian bookworm chroot with WINE
+        id: cache_chroot
+        uses: actions/cache@v5
+        with:
+          path: chroot.tar.zst
+          key: chroot-bookworm-${{ steps.vars.outputs.debian_arch }}-wine
+
+      - name: Create Debian chroot and install WINE
+        if: steps.cache_chroot.outputs.cache-hit != 'true'
+        run: |
+          DEBIAN_ARCH="${{ steps.vars.outputs.debian_arch }}"
+
+          # Bootstrap a Debian bookworm root filesystem for the target arch.
+          # qemu-debootstrap handles the QEMU-assisted second stage automatically
+          # for foreign architectures; for native arches it behaves like plain
+          # debootstrap.
+          sudo qemu-debootstrap \
+            --arch="$DEBIAN_ARCH" \
+            bookworm rootfs \
+            https://deb.debian.org/debian
+
+          # After qemu-debootstrap, binfmt_misc is registered on the host for
+          # every foreign architecture.  Chroot commands can be invoked directly
+          # without specifying the QEMU interpreter explicitly — the kernel
+          # dispatches foreign ELF binaries through binfmt_misc automatically.
+          sudo chroot rootfs apt-get update -q
+
+          # Detect the latest Wine version available in the distro's repository.
+          WINE_VERSION=$(sudo chroot rootfs apt-cache policy wine \
+            | grep Candidate | awk '{print $2}')
+          echo "Latest available Wine version for ${DEBIAN_ARCH}: ${WINE_VERSION}"
+
+          # Install Wine.
+          sudo chroot rootfs apt-get install -y wine
+
+          # Pack the chroot for caching (zstd for a good speed/size trade-off).
+          sudo tar --zstd -cf chroot.tar.zst rootfs
+
+      - name: Restore Debian chroot from cache
+        if: steps.cache_chroot.outputs.cache-hit == 'true'
+        run: |
+          sudo tar --zstd -xf chroot.tar.zst
+
+      # ── Run under emulation ─────────────────────────────────────────────────
+
+      - name: Run hello.exe on WINE (${{ inputs.arch }})
+        run: |
+          # Bind-mount /proc, /dev, and the workspace into the chroot so that
+          # Wine's wineserver can access kernel interfaces and hello.exe is
+          # accessible at /mnt/work/hello.exe inside the chroot.
+          sudo mkdir -p rootfs/mnt/work
+          sudo mount --bind /proc  rootfs/proc
+          sudo mount --bind /dev   rootfs/dev
+          sudo mount --bind "$PWD" rootfs/mnt/work
+          trap 'sudo umount rootfs/mnt/work 2>/dev/null || true
+                sudo umount rootfs/dev        2>/dev/null || true
+                sudo umount rootfs/proc       2>/dev/null || true' EXIT
+
+          # Step 1: Warm-up run to initialize the Wine prefix.
+          # On the very first run Wine runs wineboot.exe internally to set up the
+          # Windows registry and virtual filesystem.  After initialization,
+          # wineboot exits with code 53 ("configuration updated / reboot
+          # required") and Wine exits without running the requested program.
+          # We tolerate any exit code here; the purpose is only to populate the
+          # prefix so the real run below can skip initialization entirely.
+          # WINEDLLPATH must be set inside the chroot environment (after chroot)
+          # so that it refers to paths within the chroot, not the host.
+          sudo chroot rootfs \
+            env HOME=/tmp WINEDEBUG=-all \
+                WINEDLLPATH=/usr/lib/${{ steps.vars.outputs.debian_multiarch }}/wine \
+                WINEARCH=${{ steps.vars.outputs.wine_arch }} \
+            wine /mnt/work/hello.exe 2>&1 | head -20 || true
+
+          # Wait for wineserver to shut down cleanly before starting a new session.
+          sudo chroot rootfs env HOME=/tmp wineserver -w
+
+          # Step 2: Run hello.exe for real.
+          # The prefix is now fully initialized so Wine skips wineboot and
+          # executes hello.exe directly.
+          sudo chroot rootfs \
+            env HOME=/tmp WINEDEBUG=-all \
+                WINEDLLPATH=/usr/lib/${{ steps.vars.outputs.debian_multiarch }}/wine \
+                WINEARCH=${{ steps.vars.outputs.wine_arch }} \
+            wine /mnt/work/hello.exe
+
+      # ── Artifact upload ─────────────────────────────────────────────────────
+
+      - name: Upload binary artifact
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: hello-${{ inputs.arch }}
+          path: hello.exe
+          if-no-files-found: ignore
