@@ -106,7 +106,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: chroot.tar.zst
-          key: chroot-bookworm-${{ steps.vars.outputs.debian_arch }}-wine-v5
+          key: chroot-bookworm-${{ steps.vars.outputs.debian_arch }}-wine-v6
 
       - name: Create Debian chroot and install WINE
         if: steps.cache_chroot.outputs.cache-hit != 'true'
@@ -119,102 +119,45 @@ jobs:
           # debootstrap.
           sudo qemu-debootstrap \
             --arch="$DEBIAN_ARCH" \
-            bookworm /chroot \
-            http://deb.debian.org/debian
+            bookworm chroot \
+            https://deb.debian.org/debian
 
           # After qemu-debootstrap, binfmt_misc is registered on the host for
           # every foreign architecture.  Chroot commands can be invoked directly
           # without specifying the QEMU interpreter explicitly — the kernel
           # dispatches foreign ELF binaries through binfmt_misc automatically.
-          sudo chroot /chroot apt-get update -q
+          sudo chroot chroot apt-get update -q
 
           # Detect the latest Wine version available in the distro's repository.
-          WINE_VERSION=$(sudo chroot /chroot apt-cache policy wine \
+          WINE_VERSION=$(sudo chroot chroot apt-cache policy wine \
             | grep Candidate | awk '{print $2}')
           echo "Latest available Wine version for ${DEBIAN_ARCH}: ${WINE_VERSION}"
 
           # Install Wine.
-          sudo chroot /chroot apt-get install -y wine
+          sudo chroot chroot apt-get install -y wine
 
           # Pack the chroot for caching (zstd for a good speed/size trade-off).
-          sudo tar --zstd -cf chroot.tar.zst -C / chroot
+          sudo tar --zstd -cf chroot.tar.zst chroot
 
       - name: Restore Debian chroot from cache
         if: steps.cache_chroot.outputs.cache-hit == 'true'
         run: |
-          sudo tar --zstd -xf chroot.tar.zst -C /
+          sudo tar --zstd -xf chroot.tar.zst
 
       # ── Run under emulation ─────────────────────────────────────────────────
 
       - name: Run hello.exe on WINE (${{ inputs.arch }})
         run: |
-          sudo cp hello.exe /chroot/hello.exe
-
-          # Locate the wine ELF loader binary inside the chroot.  On Debian/Ubuntu
-          # the ELF is always at /usr/lib/wine/wine[64]; this path is used as
-          # WINELOADER so that Wine can find ntdll.so relative to the loader
-          # even when /proc/self/exe reports the QEMU interpreter path instead
-          # of the wine binary path under binfmt_misc emulation.
-          if [ "${{ steps.vars.outputs.wine_arch }}" = "win64" ]; then
-            WINE_ELF="/usr/lib/wine/wine64"
-          else
-            WINE_ELF="/usr/lib/wine/wine"
-          fi
-          if [ ! -f "/chroot${WINE_ELF}" ]; then
-            echo "ERROR: Wine ELF not found at ${WINE_ELF} in chroot" >&2
-            exit 1
-          fi
-          echo "Wine ELF: ${WINE_ELF}"
-
-          # Use the wine wrapper script as the entry point.  On Debian/Ubuntu
-          # the wine package installs a shell script at /usr/bin/wine-stable
-          # (and symlinks /usr/bin/wine → /etc/alternatives/wine → that script).
-          # The script detects which Wine binary to run and, for the wine64 code
-          # path, exports WINELOADER pointing at the ELF — which is exactly what
-          # Wine needs to find ntdll.so when /proc/self/exe is unreliable.
-          #
-          # IMPORTANT: do NOT use readlink -f on /chroot/usr/bin/wine to find
-          # the script.  readlink -f follows absolute symlinks through the HOST
-          # filesystem, so /chroot/usr/bin/wine → /etc/alternatives/wine is
-          # resolved against the HOST's /etc/alternatives/wine (which may not
-          # exist on a runner without wine installed), not the chroot's.
-          #
-          # On Debian Bookworm, /etc/alternatives/wine is the script itself
-          # (a regular file, not a further symlink), so it is safe to use directly.
-          if [ -f "/chroot/usr/bin/wine-stable" ]; then
-            WINE_CMD="/usr/bin/wine-stable"
-          elif [ -f "/chroot/etc/alternatives/wine" ]; then
-            WINE_CMD="/etc/alternatives/wine"
-          else
-            WINE_CMD="${WINE_ELF}"
-          fi
-          echo "Wine command: ${WINE_CMD}"
-
-          # Bind-mount /proc and /dev so that Wine's wineserver can access
-          # kernel interfaces (e.g. /proc/self/fd, /dev/urandom).
-          sudo mount --bind /proc /chroot/proc
-          sudo mount --bind /dev  /chroot/dev
-          trap 'sudo umount /chroot/dev  2>/dev/null || true
-                sudo umount /chroot/proc 2>/dev/null || true' EXIT
-
-          # binfmt_misc (F flag) transparently routes foreign-arch Wine ELF
-          # binaries through qemu-<arch>-static on exec(), regardless of the
-          # host machine's architecture.
-          #
-          # QEMU_EXECVE=1 instructs qemu-user to intercept execve(2) calls from
-          # within the emulated process and re-route them back through qemu-static,
-          # preventing any Linux ELF from escaping the QEMU sandbox.
-          #
-          # WINELOADER is set to the wine ELF path so that Wine can always locate
-          # its install tree (and thus ntdll.so) via realpath(WINELOADER), even
-          # when /proc/self/exe points to the QEMU interpreter under binfmt_misc.
-          # This also ensures the correct path is used when Wine re-execs itself
-          # after creating the Wine prefix during first-run initialization.
-          #
-          # WINEARCH restricts the Wine prefix to a single bitness: win32 for
-          # 32-bit targets, win64 for 64-bit targets.  Without this, wine64 would
-          # attempt to create a WoW64 (mixed 32+64-bit) prefix, which requires
-          # wine32 libraries not present in a pure 64-bit chroot.
+          # Bind-mount /proc, /dev, and the workspace into the chroot so that
+          # Wine's wineserver can access kernel interfaces and hello.exe is
+          # accessible at /mnt/work/hello.exe inside the chroot.
+          sudo mkdir -p chroot/mnt/work
+          sudo mount --bind /proc  chroot/proc
+          sudo mount --bind /dev   chroot/dev
+          sudo mount --bind "$PWD" chroot/mnt/work
+          trap 'sudo umount chroot/mnt/work 2>/dev/null || true
+                sudo umount chroot/dev        2>/dev/null || true
+                sudo umount chroot/proc       2>/dev/null || true' EXIT
 
           # Step 1: Warm-up run to initialize the Wine prefix.
           # On the very first run Wine runs wineboot.exe internally to set up the
@@ -223,11 +166,13 @@ jobs:
           # required") and Wine exits without running the requested program.
           # We tolerate any exit code here; the purpose is only to populate the
           # prefix so the real run below can skip initialization entirely.
-          sudo chroot /chroot \
-            env HOME=/tmp WINEDEBUG=-all QEMU_EXECVE=1 \
-                WINELOADER="${WINE_ELF}" \
+          # WINEDLLPATH must be set inside the chroot environment (after chroot)
+          # so that it refers to paths within the chroot, not the host.
+          sudo chroot chroot \
+            env HOME=/tmp WINEDEBUG=-all \
+                WINEDLLPATH=/usr/lib/${{ steps.vars.outputs.debian_multiarch }}/wine \
                 WINEARCH=${{ steps.vars.outputs.wine_arch }} \
-            "${WINE_CMD}" /hello.exe 2>&1 | head -20 || true
+            wine /mnt/work/hello.exe 2>&1 | head -20 || true
 
           # Give wineserver time to notice that all clients have exited and
           # shut down cleanly before we start a fresh Wine session.
@@ -236,12 +181,11 @@ jobs:
           # Step 2: Run hello.exe for real.
           # The prefix is now fully initialized so Wine skips wineboot and
           # executes hello.exe directly.
-          # hello.exe is a Windows PE binary; Wine handles it via the Win32
-          # CreateProcess() API — no Linux execve() is issued for PE files.
-          sudo chroot /chroot \
-            env HOME=/tmp WINEDEBUG=-all QEMU_EXECVE=1 \
-                WINELOADER="${WINE_ELF}" \
-            "${WINE_CMD}" /hello.exe
+          sudo chroot chroot \
+            env HOME=/tmp WINEDEBUG=-all \
+                WINEDLLPATH=/usr/lib/${{ steps.vars.outputs.debian_multiarch }}/wine \
+                WINEARCH=${{ steps.vars.outputs.wine_arch }} \
+            wine /mnt/work/hello.exe
 
       # ── Artifact upload ─────────────────────────────────────────────────────
 
