@@ -61,11 +61,11 @@ jobs:
           cd release
           zip -r "../BootstrapPlayground-${{ steps.version.outputs.version }}.zip" .
 
-      - name: Upload release ZIP as workflow artifact
+      - name: Upload release as workflow artifact
         uses: actions/upload-artifact@v7
         with:
           name: release-${{ steps.version.outputs.version }}
-          path: BootstrapPlayground-${{ steps.version.outputs.version }}.zip
+          path: release/
 
       - name: Create GitHub Release and tag commit
         if: github.event_name == 'push' && github.ref == 'refs/heads/master'
