@@ -77,43 +77,46 @@ inline bool NT_SUCCESS(NTSTATUS st) noexcept {
 }
 
 // ---------------------------------------------------------------------------
-// IRP major-function codes
+// IRP major-function codes.
+// Define with #ifndef guards in case <winternl.h> or other Windows headers
+// already provide them (they are present in DDK / Driver Kit headers).
 // ---------------------------------------------------------------------------
 
-enum {
-    IRP_MJ_CREATE                   =  0,
-    IRP_MJ_CREATE_NAMED_PIPE        =  1,
-    IRP_MJ_CLOSE                    =  2,
-    IRP_MJ_READ                     =  3,
-    IRP_MJ_WRITE                    =  4,
-    IRP_MJ_QUERY_INFORMATION        =  5,
-    IRP_MJ_SET_INFORMATION          =  6,
-    IRP_MJ_QUERY_EA                 =  7,
-    IRP_MJ_SET_EA                   =  8,
-    IRP_MJ_FLUSH_BUFFERS            =  9,
-    IRP_MJ_QUERY_VOLUME_INFORMATION = 10,
-    IRP_MJ_SET_VOLUME_INFORMATION   = 11,
-    IRP_MJ_DIRECTORY_CONTROL        = 12,
-    IRP_MJ_FILE_SYSTEM_CONTROL      = 13,
-    IRP_MJ_DEVICE_CONTROL           = 14,
-    IRP_MJ_INTERNAL_DEVICE_CONTROL  = 15,
-    IRP_MJ_SHUTDOWN                 = 16,
-    IRP_MJ_LOCK_CONTROL             = 17,
-    IRP_MJ_CLEANUP                  = 18,
-    IRP_MJ_CREATE_MAILSLOT          = 19,
-    IRP_MJ_QUERY_SECURITY           = 20,
-    IRP_MJ_SET_SECURITY             = 21,
-    IRP_MJ_POWER                    = 22,
-    IRP_MJ_SYSTEM_CONTROL           = 23,
-    IRP_MJ_DEVICE_CHANGE            = 24,
-    IRP_MJ_QUERY_QUOTA              = 25,
-    IRP_MJ_SET_QUOTA                = 26,
-    IRP_MJ_PNP                      = 27,
-    IRP_MJ_MAXIMUM_FUNCTION         = 27,
-};
+#ifndef IRP_MJ_CREATE
+#  define IRP_MJ_CREATE                   0
+#  define IRP_MJ_CREATE_NAMED_PIPE        1
+#  define IRP_MJ_CLOSE                    2
+#  define IRP_MJ_READ                     3
+#  define IRP_MJ_WRITE                    4
+#  define IRP_MJ_QUERY_INFORMATION        5
+#  define IRP_MJ_SET_INFORMATION          6
+#  define IRP_MJ_QUERY_EA                 7
+#  define IRP_MJ_SET_EA                   8
+#  define IRP_MJ_FLUSH_BUFFERS            9
+#  define IRP_MJ_QUERY_VOLUME_INFORMATION 10
+#  define IRP_MJ_SET_VOLUME_INFORMATION   11
+#  define IRP_MJ_DIRECTORY_CONTROL        12
+#  define IRP_MJ_FILE_SYSTEM_CONTROL      13
+#  define IRP_MJ_DEVICE_CONTROL           14
+#  define IRP_MJ_INTERNAL_DEVICE_CONTROL  15
+#  define IRP_MJ_SHUTDOWN                 16
+#  define IRP_MJ_LOCK_CONTROL             17
+#  define IRP_MJ_CLEANUP                  18
+#  define IRP_MJ_CREATE_MAILSLOT          19
+#  define IRP_MJ_QUERY_SECURITY           20
+#  define IRP_MJ_SET_SECURITY             21
+#  define IRP_MJ_POWER                    22
+#  define IRP_MJ_SYSTEM_CONTROL           23
+#  define IRP_MJ_DEVICE_CHANGE            24
+#  define IRP_MJ_QUERY_QUOTA              25
+#  define IRP_MJ_SET_QUOTA                26
+#  define IRP_MJ_PNP                      27
+#  define IRP_MJ_MAXIMUM_FUNCTION         27
+#endif
 
-// Number of MajorFunction entries in DRIVER_OBJECT.
-inline constexpr int IRP_MJ_COUNT = IRP_MJ_MAXIMUM_FUNCTION + 1;
+// Number of MajorFunction[] entries: IRP_MJ_MAXIMUM_FUNCTION + 1 = 28.
+// Use a literal constant to avoid any dependency on the name defined above.
+#define IRP_MJ_COUNT 28
 
 // ---------------------------------------------------------------------------
 // Forward declarations

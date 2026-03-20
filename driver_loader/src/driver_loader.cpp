@@ -59,7 +59,7 @@ get_data_dir(const void* base, int index) noexcept {
     const auto* nth  =
         reinterpret_cast<const IMAGE_NT_HEADERS*>(
             static_cast<const char*>(base) + dos->e_lfanew);
-    if (index >= nth->OptionalHeader.NumberOfRvaAndSizes) return nullptr;
+    if (static_cast<DWORD>(index) >= nth->OptionalHeader.NumberOfRvaAndSizes) return nullptr;
     const auto& dir = nth->OptionalHeader.DataDirectory[index];
     if (dir.VirtualAddress == 0) return nullptr;
     return &dir;
