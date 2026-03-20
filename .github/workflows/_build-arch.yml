@@ -107,33 +107,45 @@ jobs:
           echo "test_host_exe=$PWD/build/test_host/test_host.exe"     >> "$GITHUB_OUTPUT"
           echo "test_driver_sys=$PWD/build/test_driver/test_driver.sys" >> "$GITHUB_OUTPUT"
 
-      # ── QEMU + Debian chroot + WINE ─────────────────────────────────────────
+      # ── QEMU + Ubuntu Noble chroot + WINE ──────────────────────────────────
 
       - name: Install QEMU user-mode emulation and debootstrap
         run: |
           sudo apt-get update -q
           sudo apt-get install -y qemu-user-static binfmt-support debootstrap
 
-      - name: Cache Debian bookworm chroot with WINE
+      - name: Cache Ubuntu Noble chroot with WINE
         id: cache_chroot
         uses: actions/cache@v5
         with:
           path: chroot.tar.zst
-          key: chroot-bookworm-${{ steps.vars.outputs.debian_arch }}-wine
+          key: chroot-noble-${{ steps.vars.outputs.debian_arch }}-wine-v1
 
-      - name: Create Debian chroot and install WINE
+      - name: Create Ubuntu Noble chroot and install WINE
         if: steps.cache_chroot.outputs.cache-hit != 'true'
         run: |
           DEBIAN_ARCH="${{ steps.vars.outputs.debian_arch }}"
 
-          # Bootstrap a Debian bookworm root filesystem for the target arch.
+          # Ubuntu Noble uses different mirrors for amd64/i386 vs arm64/armhf.
+          case "$DEBIAN_ARCH" in
+            amd64|i386)
+              UBUNTU_MIRROR="http://archive.ubuntu.com/ubuntu"
+              ;;
+            *)
+              UBUNTU_MIRROR="http://ports.ubuntu.com/ubuntu-ports"
+              ;;
+          esac
+
+          # Bootstrap an Ubuntu Noble (24.04) root filesystem for the target
+          # arch.  We include 'universe' so that Wine 9.0 is available.
           # qemu-debootstrap handles the QEMU-assisted second stage automatically
           # for foreign architectures; for native arches it behaves like plain
           # debootstrap.
           sudo qemu-debootstrap \
             --arch="$DEBIAN_ARCH" \
-            bookworm rootfs \
-            https://deb.debian.org/debian
+            --components=main,restricted,universe \
+            noble rootfs \
+            "$UBUNTU_MIRROR"
 
           # After qemu-debootstrap, binfmt_misc is registered on the host for
           # every foreign architecture.  Chroot commands can be invoked directly
@@ -141,18 +153,20 @@ jobs:
           # dispatches foreign ELF binaries through binfmt_misc automatically.
           sudo chroot rootfs apt-get update -q
 
-          # Detect the latest Wine version available in the distro's repository.
+          # Detect the Wine version available in the distro's repository.
           WINE_VERSION=$(sudo chroot rootfs apt-cache policy wine \
             | grep Candidate | awk '{print $2}')
-          echo "Latest available Wine version for ${DEBIAN_ARCH}: ${WINE_VERSION}"
+          echo "Wine version for ${DEBIAN_ARCH}: ${WINE_VERSION}"
 
-          # Install Wine.
+          # Install Wine 9.0+ (from Ubuntu Noble universe).
+          # Wine 9.0 fixes ARM32 Thumb assertion and ARM64 page-fault bugs
+          # present in Wine 8.x (Debian bookworm).
           sudo chroot rootfs apt-get install -y wine
 
           # Pack the chroot for caching (zstd for a good speed/size trade-off).
           sudo tar --zstd -cf chroot.tar.zst rootfs
 
-      - name: Restore Debian chroot from cache
+      - name: Restore Ubuntu Noble chroot from cache
         if: steps.cache_chroot.outputs.cache-hit == 'true'
         run: |
           sudo tar --zstd -xf chroot.tar.zst
