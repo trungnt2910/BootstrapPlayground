@@ -565,8 +565,9 @@ void* DriverLoader::get_export(std::uint16_t ordinal) const {
 
     const DWORD rva = funcs[ordinal - ied->Base];
     if (rva == 0) return nullptr;
-    const IMAGE_DATA_DIRECTORY* ed = get_data_dir(m_base, IMAGE_DIRECTORY_ENTRY_EXPORT);
-    if (ed && rva >= ed->VirtualAddress && rva < ed->VirtualAddress + ed->Size)
-        return nullptr;  // Forwarded.
+    // Check for forwarded export (RVA falls inside the export directory).
+    if (rva >= export_dir->VirtualAddress &&
+        rva < export_dir->VirtualAddress + export_dir->Size)
+        return nullptr;  // Forwarded exports not resolved here.
     return rva_to_ptr(m_base, rva);
 }

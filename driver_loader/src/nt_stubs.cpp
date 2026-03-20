@@ -208,7 +208,10 @@ static VOID NTAPI impl_RtlInitUnicodeString(UNICODE_STRING* dest,
         dest->Buffer        = nullptr;
         return;
     }
-    const auto len = static_cast<USHORT>(std::wcslen(src) * sizeof(WCHAR));
+    const std::size_t raw_len = std::wcslen(src) * sizeof(WCHAR);
+    // UNICODE_STRING.Length is USHORT; clamp to avoid overflow.
+    constexpr std::size_t kMaxLen = 0xFFFEu;  // leave room for the NUL terminator
+    const auto len = static_cast<USHORT>(raw_len < kMaxLen ? raw_len : kMaxLen);
     dest->Buffer        = const_cast<WCHAR*>(src);
     dest->Length        = len;
     dest->MaximumLength = len + static_cast<USHORT>(sizeof(WCHAR));

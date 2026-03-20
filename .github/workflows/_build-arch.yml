@@ -90,6 +90,8 @@ jobs:
         run: sudo apt-get install -y ninja-build
 
       - name: Build with CMake for ${{ inputs.arch }}
+        env:
+          MINGW_ARCH: ${{ steps.vars.outputs.mingw_arch }}
         run: |
           export PATH="$PWD/llvm-mingw/bin:$PATH"
           cmake -B build -G Ninja \
