@@ -147,7 +147,7 @@ jobs:
         uses: actions/cache@v5
         with:
           path: chroot.tar.zst
-          key: alpine-${{ steps.vars.outputs.alpine_arch }}-wine-${{ steps.wine_version.outputs.version }}-v1
+          key: alpine-${{ steps.vars.outputs.alpine_arch }}-wine-${{ steps.wine_version.outputs.version }}-v2
 
       # ── x86/x64: build chroot with apk wine ────────────────────────────────
 
@@ -175,16 +175,18 @@ jobs:
             "$ALPINE_MIRROR" "$ALPINE_MIRROR" \
             | sudo tee rootfs/etc/apk/repositories > /dev/null
 
-          # Bind-mount /proc and /dev so apk post-install scripts work.
-          sudo mount --bind /proc rootfs/proc
-          sudo mount --bind /dev  rootfs/dev
-          trap 'sudo umount rootfs/dev  2>/dev/null || true
-                sudo umount rootfs/proc 2>/dev/null || true' EXIT
-
+          # Run apk without mounting /proc or /dev.  Alpine's musl-based packages
+          # do not use ld.so.cache or other proc-dependent mechanisms, so post-
+          # install scripts work fine without the bind mounts.
+          # Use --no-scripts to skip any package that requires proc/sysfs.
           sudo chroot rootfs apk update
-          sudo chroot rootfs apk add --no-cache wine
+          sudo chroot rootfs apk add --no-cache --no-scripts wine
 
-          sudo tar --zstd -cf chroot.tar.zst rootfs
+          # Exclude /proc and /dev from the archive to avoid capturing virtual-
+          # filesystem files (which are write-only or produce EPERM on read).
+          sudo tar --zstd -cf chroot.tar.zst \
+            --exclude='./proc/*' --exclude='./dev/*' \
+            -C rootfs .
 
       # ── ARM/ARM64: cross-compile Wine from source ───────────────────────────
 
@@ -221,17 +223,14 @@ jobs:
           # musl-dev provides CRT startup files (crt1.o etc.) and static musl.
           # gcc provides the libgcc_s.so linker stub needed to resolve -lgcc_s
           # at link time.  libgcc provides the libgcc_s.so.1 runtime itself.
-          sudo mount --bind /proc "$SYSROOT/proc"
-          sudo mount --bind /dev  "$SYSROOT/dev"
+          # Use --no-scripts to skip any post-install hook that needs /proc.
           sudo chroot "$SYSROOT" apk update
-          sudo chroot "$SYSROOT" apk add --no-cache \
+          sudo chroot "$SYSROOT" apk add --no-cache --no-scripts \
             musl-dev \
             freetype-dev \
             zlib-dev \
             libgcc \
             gcc
-          sudo umount "$SYSROOT/dev"
-          sudo umount "$SYSROOT/proc"
 
           # ── 3. Set up llvm-mingw's clang as the musl cross-compiler ───────────
           # llvm-mingw (already downloaded for the MinGW build) ships clang and
@@ -283,18 +282,14 @@ jobs:
 
           # ── 6. Build Wine host tools ───────────────────────────────────────
           # Wine's cross-compilation requires host (x86_64) binaries for
-          # winebuild, widl, wmc, and wrc.  Build them with the host GCC using
-          # the same disable flags as the cross-compiled build so that the tool
-          # set is consistent.  --enable-win64 is needed when the target is a
-          # 64-bit architecture (aarch64) so the host tools produce 64-bit PE
-          # stubs; for ARM32 (arm-linux-musleabihf) it is omitted.
-          HOST_EXTRA=""
-          if [ "${{ steps.vars.outputs.wine_arch }}" = "win64" ]; then
-            HOST_EXTRA="--enable-win64"
-          fi
+          # winebuild, widl, wmc, and wrc.  Always enable --enable-win64 so the
+          # configure check for 'gcc -m32' is skipped (Ubuntu runners lack 32-bit
+          # development libraries).  winebuild can still generate ARM32 PE stubs
+          # when invoked with the correct --target flag; the host-tools bitness
+          # only affects the ELF wrappers, not PE output.
           mkdir wine-tools-build && cd wine-tools-build
           "$WINE_SRC/configure" \
-            $HOST_EXTRA \
+            --enable-win64 \
             --without-x \
             --without-opengl \
             --without-vulkan \
@@ -326,8 +321,8 @@ jobs:
           cd ..
 
           # ── 7. Cross-compile Wine for ${MUSL_TARGET} ──────────────────────
-          # Point pkg-config at the Alpine sysroot so Wine's configure finds
-          # freetype and zlib headers/libraries for the target architecture.
+          # zlib is the only library dependency we keep; freetype is disabled so
+          # no font-related configure checks need to pass through the sysroot.
           # PKG_CONFIG_SYSROOT_DIR causes pkg-config to prepend the sysroot
           # path to all returned -I and -L flags.
           mkdir wine-cross-build && cd wine-cross-build
@@ -350,6 +345,7 @@ jobs:
             --without-pulse \
             --without-dbus \
             --without-gstreamer \
+            --without-freetype \
             --without-v4l2 \
             --without-sane \
             --without-cups \
@@ -374,11 +370,15 @@ jobs:
           cd ..
 
           # ── 8. Pack the chroot ─────────────────────────────────────────────
-          sudo tar --zstd -cf chroot.tar.zst rootfs
+          # Exclude /proc and /dev to avoid capturing virtual-filesystem files
+          # that are write-only or produce EPERM when read by tar.
+          sudo tar --zstd -cf chroot.tar.zst \
+            --exclude='./proc/*' --exclude='./dev/*' \
+            -C rootfs .
 
       - name: Restore Alpine chroot from cache
         if: steps.cache_chroot.outputs.cache-hit == 'true'
-        run: sudo tar --zstd -xf chroot.tar.zst
+        run: sudo mkdir -p rootfs && sudo tar --zstd -xf chroot.tar.zst -C rootfs
 
       # ── Run under emulation ─────────────────────────────────────────────────
 
