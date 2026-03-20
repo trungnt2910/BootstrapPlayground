@@ -24,15 +24,11 @@
 
 // ---------------------------------------------------------------------------
 // Consumer-supplied stub: LxInitialize (normally exported by lxcore.sys).
-//
-// lxmonika and similar drivers call LxInitialize to register themselves with
-// the Pico subsystem.  In a usermode test environment we simply return
-// STATUS_SUCCESS so that DriverEntry can proceed.
 // ---------------------------------------------------------------------------
 
 extern "C" NTSTATUS NTAPI LxInitialize(PDRIVER_OBJECT /*driverObject*/,
                                         PVOID          /*subsystem*/) {
-    std::fprintf(stderr, "[test_host] LxInitialize stub called – returning STATUS_SUCCESS.\n");
+    std::fprintf(stderr, "[test_host] LxInitialize stub called.\n");
     return STATUS_SUCCESS;
 }
 
@@ -41,30 +37,41 @@ extern "C" NTSTATUS NTAPI LxInitialize(PDRIVER_OBJECT /*driverObject*/,
 // ---------------------------------------------------------------------------
 
 int main(int argc, char* argv[]) {
-    // Resolve the driver path without returning std::string from a helper.
-    // Returning a non-trivially-copyable type like std::string by value from
-    // a separate function involves a hidden-pointer ABI that can be
-    // unreliable under Wine/QEMU on some architectures.  Building the path
-    // directly inside main avoids the issue entirely.
-    char default_exe_path[MAX_PATH] = {};
-    std::string driver_path;
-    if (argc >= 2) {
-        driver_path = argv[1];
+    // Build the driver path using only C-style string operations so that
+    // no heap allocation (std::string) is needed before the try block.
+    // On some Wine+QEMU configurations (e.g. ARM64 under Debian bookworm),
+    // heap allocation can silently fail before the runtime is fully set up.
+    static char default_path[MAX_PATH + 32];
+    const char* path_cstr = nullptr;
+
+    if (argc >= 2 && argv[1] != nullptr && argv[1][0] != '\0') {
+        path_cstr = argv[1];
     } else {
-        GetModuleFileNameA(nullptr, default_exe_path, MAX_PATH);
-        driver_path = default_exe_path;
-        const auto slash = driver_path.find_last_of("/\\");
-        if (slash != std::string::npos)
-            driver_path.resize(slash + 1);
-        else
-            driver_path.clear();
-        driver_path += "test_driver.sys";
+        DWORD n = GetModuleFileNameA(nullptr, default_path, MAX_PATH);
+        if (n > 0) {
+            // Truncate at the last directory separator.
+            char* sep1 = std::strrchr(default_path, '\\');
+            char* sep2 = std::strrchr(default_path, '/');
+            char* last_sep = (sep1 > sep2) ? sep1 : sep2;
+            if (last_sep) {
+                *(last_sep + 1) = '\0';  // keep the separator, clear after it
+            } else {
+                default_path[0] = '\0';  // no separator – use cwd
+            }
+        } else {
+            default_path[0] = '\0';
+        }
+        std::strncat(default_path, "test_driver.sys",
+                     sizeof(default_path) - std::strlen(default_path) - 1);
+        path_cstr = default_path;
     }
 
-    std::fprintf(stderr, "[test_host] Loading driver: %s\n", driver_path.c_str());
+    std::fprintf(stderr, "[test_host] Loading driver: %s\n", path_cstr);
 
     try {
-        DriverLoader loader(driver_path);
+        // DriverLoader constructor accepts std::string; construct it here
+        // inside the try block so any allocation failure is caught.
+        DriverLoader loader(path_cstr);
 
         // Supply the LxInitialize symbol so the driver's import from lxcore.sys
         // resolves to our stub above.
@@ -117,3 +124,4 @@ int main(int argc, char* argv[]) {
         return EXIT_FAILURE;
     }
 }
+
