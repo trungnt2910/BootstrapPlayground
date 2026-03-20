@@ -1,28 +1,80 @@
 #pragma once
 // wdm.hpp – Minimal ABI-compatible replications of Windows Driver Kit structures.
 //
-// Pull in <windows.h> and <winternl.h> first so that all standard scalar
-// types (NTSTATUS, LONG, ULONG, PVOID, UNICODE_STRING, LIST_ENTRY, …) come
-// from the system headers.  We only define driver-specific types that are NOT
-// exported by those headers.
+// This header intentionally does NOT include <windows.h> or <winternl.h>.
+// Those headers must be included BEFORE this header in translation units that
+// need both (e.g., driver_loader.cpp, nt_stubs.cpp, test_host.cpp).
+//
+// The reason is that <windows.h> / <winternl.h> from some llvm-mingw builds
+// define macros with the same names as our kernel types (PDRIVER_OBJECT, etc.),
+// which would corrupt our C++ 'using' declarations.  By including wdm.hpp
+// AFTER <windows.h>, any such macros are already defined and we test for them
+// with #ifdef guards rather than letting them silently corrupt our code.
+//
+// Scalar types (NTSTATUS, ULONG, …) are defined here using C++ primitive types
+// guarded with the same macros Windows SDK uses, so the definitions are
+// compatible when windows.h is included in the same TU.
 
-#include <windows.h>
-#include <winternl.h>
+// ---------------------------------------------------------------------------
+// Scalar types (guarded for compatibility with windows.h)
+// ---------------------------------------------------------------------------
 
-// PUNICODE_STRING / PCUNICODE_STRING are typedef'd in winternl.h on most
-// MinGW builds.  Provide them only if they are missing.
-#ifndef _PUNICODE_STRING_DEFINED
-#define _PUNICODE_STRING_DEFINED
+#ifndef _NTSTATUS_
+#define _NTSTATUS_
+typedef long NTSTATUS;
+#endif
+#ifndef __NTSTATUS_DEFINED
+#define __NTSTATUS_DEFINED
+#endif
+
+#ifndef _WINNT_
+// Only define if windows.h hasn't been included yet.
+typedef long                LONG;
+typedef unsigned long       ULONG;
+typedef unsigned short      USHORT;
+typedef short               SHORT;
+typedef unsigned char       UCHAR;
+typedef wchar_t             WCHAR;
+typedef unsigned char       BOOLEAN;
+typedef long long           LONGLONG;
+typedef unsigned long long  ULONGLONG;
+typedef void*               PVOID;
+typedef void*               HANDLE;
+#if defined(_WIN64)
+typedef unsigned long long  ULONG_PTR;
+typedef long long           LONG_PTR;
+typedef unsigned long long  SIZE_T;
+#else
+typedef unsigned long       ULONG_PTR;
+typedef long                LONG_PTR;
+typedef unsigned long       SIZE_T;
+#endif
+typedef unsigned short      WORD;
+typedef unsigned long       DWORD;
+typedef int                 BOOL;
+typedef unsigned char       BYTE;
+#endif // _WINNT_
+
+// ---------------------------------------------------------------------------
+// UNICODE_STRING – must match Windows ABI exactly
+// ---------------------------------------------------------------------------
+
+#ifndef _UNICODE_STRING_DEFINED
+#define _UNICODE_STRING_DEFINED
+typedef struct _UNICODE_STRING {
+    USHORT Length;
+    USHORT MaximumLength;
+    WCHAR* Buffer;
+} UNICODE_STRING;
+#endif
+
 typedef UNICODE_STRING* PUNICODE_STRING;
 typedef const UNICODE_STRING* PCUNICODE_STRING;
-#endif
 
 // ---------------------------------------------------------------------------
 // Calling convention
 // ---------------------------------------------------------------------------
 
-// On x86, most kernel functions use __stdcall (callee cleans the stack).
-// On every other architecture there is a single calling convention.
 #if defined(_M_IX86) || defined(__i386__)
 #  ifndef NTAPI
 #    define NTAPI __stdcall
@@ -40,23 +92,23 @@ typedef const UNICODE_STRING* PCUNICODE_STRING;
 #endif
 
 // ---------------------------------------------------------------------------
-// Common NT status codes – guarded so we don't conflict with windows.h
+// Common NT status codes
 // ---------------------------------------------------------------------------
 
 #ifndef STATUS_SUCCESS
-#  define STATUS_SUCCESS ((NTSTATUS)0x00000000L)
+#  define STATUS_SUCCESS           ((NTSTATUS)0x00000000L)
 #endif
 #ifndef STATUS_UNSUCCESSFUL
-#  define STATUS_UNSUCCESSFUL ((NTSTATUS)0xC0000001L)
+#  define STATUS_UNSUCCESSFUL      ((NTSTATUS)0xC0000001L)
 #endif
 #ifndef STATUS_NOT_IMPLEMENTED
-#  define STATUS_NOT_IMPLEMENTED ((NTSTATUS)0xC0000002L)
+#  define STATUS_NOT_IMPLEMENTED   ((NTSTATUS)0xC0000002L)
 #endif
 #ifndef STATUS_INVALID_PARAMETER
 #  define STATUS_INVALID_PARAMETER ((NTSTATUS)0xC000000DL)
 #endif
 #ifndef STATUS_NOT_SUPPORTED
-#  define STATUS_NOT_SUPPORTED ((NTSTATUS)0xC00000BBL)
+#  define STATUS_NOT_SUPPORTED     ((NTSTATUS)0xC00000BBL)
 #endif
 #ifndef STATUS_INSUFFICIENT_RESOURCES
 #  define STATUS_INSUFFICIENT_RESOURCES ((NTSTATUS)0xC000009AL)
@@ -68,18 +120,13 @@ typedef const UNICODE_STRING* PCUNICODE_STRING;
 #  define STATUS_OBJECT_NAME_COLLISION ((NTSTATUS)0xC0000035L)
 #endif
 #ifndef STATUS_NO_MEMORY
-#  define STATUS_NO_MEMORY ((NTSTATUS)0xC0000017L)
+#  define STATUS_NO_MEMORY         ((NTSTATUS)0xC0000017L)
 #endif
 
-// NT_SUCCESS evaluates true for informational and success codes.
-inline bool NT_SUCCESS(NTSTATUS st) noexcept {
-    return st >= 0;
-}
+inline bool NT_SUCCESS(NTSTATUS st) noexcept { return st >= 0; }
 
 // ---------------------------------------------------------------------------
-// IRP major-function codes.
-// Define with #ifndef guards in case <winternl.h> or other Windows headers
-// already provide them (they are present in DDK / Driver Kit headers).
+// IRP major-function codes
 // ---------------------------------------------------------------------------
 
 #ifndef IRP_MJ_CREATE
@@ -114,72 +161,79 @@ inline bool NT_SUCCESS(NTSTATUS st) noexcept {
 #  define IRP_MJ_MAXIMUM_FUNCTION         27
 #endif
 
-// Number of MajorFunction[] entries: IRP_MJ_MAXIMUM_FUNCTION + 1 = 28.
-// Use a literal constant to avoid any dependency on the name defined above.
+// Literal constant – does not rely on any macro name.
 #define IRP_MJ_COUNT 28
 
 // ---------------------------------------------------------------------------
-// Forward declarations
+// Forward declarations for kernel object types
 // ---------------------------------------------------------------------------
 
+#ifndef _DRIVER_OBJECT_DEFINED
+#define _DRIVER_OBJECT_DEFINED
 struct _DRIVER_OBJECT;
-using  DRIVER_OBJECT  = _DRIVER_OBJECT;
-using  PDRIVER_OBJECT = _DRIVER_OBJECT*;
+#endif
 
+#ifndef _DEVICE_OBJECT_DEFINED
+#define _DEVICE_OBJECT_DEFINED
 struct _DEVICE_OBJECT;
-using  DEVICE_OBJECT  = _DEVICE_OBJECT;
-using  PDEVICE_OBJECT = _DEVICE_OBJECT*;
+#endif
 
+#ifndef _IRP_DEFINED
+#define _IRP_DEFINED
 struct _IRP;
-using  IRP  = _IRP;
-using  PIRP = _IRP*;
+#endif
+
+typedef struct _DRIVER_OBJECT  DRIVER_OBJECT;
+typedef struct _DRIVER_OBJECT* PDRIVER_OBJECT;
+typedef struct _DEVICE_OBJECT  DEVICE_OBJECT;
+typedef struct _DEVICE_OBJECT* PDEVICE_OBJECT;
+typedef struct _IRP            IRP;
+typedef struct _IRP*           PIRP;
 
 // ---------------------------------------------------------------------------
 // Function-pointer typedefs
 // ---------------------------------------------------------------------------
 
-using PDRIVER_UNLOAD     = void (NTAPI*)(_DRIVER_OBJECT* DriverObject);
-using PDRIVER_DISPATCH   = NTSTATUS (NTAPI*)(_DEVICE_OBJECT* DeviceObject, _IRP* Irp);
-using PDRIVER_INITIALIZE = NTSTATUS (NTAPI*)(_DRIVER_OBJECT* DriverObject,
-                                              UNICODE_STRING* RegistryPath);
+typedef void  (NTAPI* PDRIVER_UNLOAD    )(DRIVER_OBJECT* DriverObject);
+typedef NTSTATUS (NTAPI* PDRIVER_DISPATCH)(DEVICE_OBJECT* DeviceObject, IRP* Irp);
+typedef NTSTATUS (NTAPI* PDRIVER_INITIALIZE)(DRIVER_OBJECT* DriverObject,
+                                             UNICODE_STRING* RegistryPath);
 
 // ---------------------------------------------------------------------------
 // DRIVER_EXTENSION
 // ---------------------------------------------------------------------------
 
-struct _DRIVER_EXTENSION {
-    _DRIVER_OBJECT*    DriverObject;
+typedef struct _DRIVER_EXTENSION {
+    DRIVER_OBJECT*     DriverObject;
     void*              AddDevice;       // PDRIVER_ADD_DEVICE
     ULONG              Count;
     UNICODE_STRING     ServiceKeyName;
-};
-using DRIVER_EXTENSION  = _DRIVER_EXTENSION;
-using PDRIVER_EXTENSION = _DRIVER_EXTENSION*;
+} DRIVER_EXTENSION, *PDRIVER_EXTENSION;
 
 // ---------------------------------------------------------------------------
-// DRIVER_OBJECT
+// DRIVER_OBJECT  (full definition)
 // ---------------------------------------------------------------------------
 
 struct _DRIVER_OBJECT {
     SHORT              Type;            // = 4 (IO_TYPE_DRIVER)
     SHORT              Size;            // = sizeof(DRIVER_OBJECT)
-    PDEVICE_OBJECT     DeviceObject;    // head of the device-object list
+    PDEVICE_OBJECT     DeviceObject;
     ULONG              Flags;
-    PVOID              DriverStart;     // base address of the driver image
-    ULONG              DriverSize;      // size of the driver image in bytes
-    PVOID              DriverSection;   // LDR_DATA_TABLE_ENTRY (unused)
+    PVOID              DriverStart;
+    ULONG              DriverSize;
+    PVOID              DriverSection;
     PDRIVER_EXTENSION  DriverExtension;
     UNICODE_STRING     DriverName;
     PUNICODE_STRING    HardwareDatabase;
-    PVOID              FastIoDispatch;  // PFAST_IO_DISPATCH (unused)
+    PVOID              FastIoDispatch;
     PDRIVER_INITIALIZE DriverInit;
-    PVOID              DriverStartIo;   // PDRIVER_STARTIO (unused)
+    PVOID              DriverStartIo;
     PDRIVER_UNLOAD     DriverUnload;
     PDRIVER_DISPATCH   MajorFunction[IRP_MJ_COUNT];
 };
 
 // ---------------------------------------------------------------------------
-// DEVICE_OBJECT (minimal subset used by the test framework)
+// DEVICE_OBJECT  (minimal subset)
 // ---------------------------------------------------------------------------
 
 struct _DEVICE_OBJECT {
@@ -193,7 +247,7 @@ struct _DEVICE_OBJECT {
     PVOID              Timer;
     ULONG              Flags;
     ULONG              Characteristics;
-    PVOID              Vpb;             // PVPB
+    PVOID              Vpb;
     PVOID              DeviceExtension;
     ULONG              DeviceType;
     UCHAR              StackSize;
@@ -203,6 +257,6 @@ struct _DEVICE_OBJECT {
 // Pool flags (POOL_FLAGS = ULONGLONG in the Windows SDK)
 // ---------------------------------------------------------------------------
 
-inline constexpr ULONGLONG POOL_FLAG_NON_PAGED          = 0x0000000000000004ULL;
-inline constexpr ULONGLONG POOL_FLAG_PAGED               = 0x0000000000000008ULL;
-inline constexpr ULONGLONG POOL_FLAG_NON_PAGED_EXECUTE   = 0x0000000000000010ULL;
+#define POOL_FLAG_NON_PAGED         ((ULONGLONG)0x0000000000000004ULL)
+#define POOL_FLAG_PAGED             ((ULONGLONG)0x0000000000000008ULL)
+#define POOL_FLAG_NON_PAGED_EXECUTE ((ULONGLONG)0x0000000000000010ULL)

@@ -1,5 +1,7 @@
 // driver_loader.cpp – PE loader implementation.
 
+// <windows.h> must come first (it's already included transitively via
+// driver_loader.hpp → <windows.h>, but make the dependency explicit here).
 #include "../include/driver_loader.hpp"
 #include "nt_stubs_internal.hpp"
 

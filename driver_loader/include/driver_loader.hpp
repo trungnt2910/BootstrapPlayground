@@ -1,5 +1,9 @@
 #pragma once
 // driver_loader.hpp – Public API of the Windows kernel-driver PE loader.
+//
+// <windows.h> must be included BEFORE this header so that Windows scalar types
+// are established before wdm.hpp's type guards kick in.
+#include <windows.h>
 
 #include "wdm.hpp"
 

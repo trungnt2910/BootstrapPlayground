@@ -6,8 +6,11 @@
 //   • The public helper used by DriverLoader to allocate a stub slot.
 //   • Implementations of common ntoskrnl.exe functions.
 
+// <windows.h> must come before wdm.hpp to establish scalar type definitions.
+#include <windows.h>
+
 #include "nt_stubs_internal.hpp"
-#include "../include/wdm.hpp"   // includes <windows.h> and <winternl.h>
+#include "../include/wdm.hpp"
 
 #include <array>
 #include <cstdarg>
