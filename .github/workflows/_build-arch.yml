@@ -170,25 +170,19 @@ jobs:
           sudo apt-get update -q
           sudo apt-get install -y qemu-user-static binfmt-support debootstrap
 
-          # Replace the package-installed QEMU binaries with the freshly built
-          # static ones (latest stable release compiled above).
-          sudo install -m 0755 _qemu/qemu-arm-static     /usr/bin/qemu-arm-static
-          sudo install -m 0755 _qemu/qemu-aarch64-static /usr/bin/qemu-aarch64-static
+          # Overwrite the package-installed QEMU binaries in-place so the
+          # kernel's binfmt_misc F-flag file descriptor (opened at package
+          # install time) picks up the new binary content via the same inode.
+          # Using "sudo install" (atomic rename) would create a new inode and
+          # leave the F-flag FD pointing at the old binary.  Deregistering and
+          # re-registering binfmt_misc entries also fails: any write to
+          # /proc/sys/fs/binfmt_misc after the initial package setup causes an
+          # ELOOP error in the GitHub Actions runner workspace on the next step.
+          # Overwriting the existing inode's content avoids both problems.
+          sudo sh -c 'cat _qemu/qemu-arm-static     > /usr/bin/qemu-arm-static'
+          sudo sh -c 'cat _qemu/qemu-aarch64-static > /usr/bin/qemu-aarch64-static'
           echo "QEMU arm  : $(qemu-arm-static     --version | head -1)"
           echo "QEMU arm64: $(qemu-aarch64-static --version | head -1)"
-
-          # Ubuntu Noble's qemu-user-static package registers binfmt_misc entries
-          # with the F (fix-binary) flag, which locks the interpreter file
-          # descriptor at registration time.  After replacing the on-disk binary
-          # the old FD still refers to the package binary; we must re-register
-          # without F so the kernel opens the binary by path on each invocation,
-          # picking up the freshly built interpreter.
-          sudo sh -c 'echo -1 > /proc/sys/fs/binfmt_misc/qemu-arm'     2>/dev/null || true
-          sudo sh -c 'echo -1 > /proc/sys/fs/binfmt_misc/qemu-aarch64' 2>/dev/null || true
-          printf ':qemu-arm:M:0:\x7f\x45\x4c\x46\x01\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x02\x00\x28\x00:\xff\xff\xff\xff\xff\xff\xff\x00\xff\xff\xff\xff\xff\xff\xff\xff\xfe\xff\xff\xff:/usr/bin/qemu-arm-static:\n' \
-            | sudo tee /proc/sys/fs/binfmt_misc/register >/dev/null
-          printf ':qemu-aarch64:M:0:\x7f\x45\x4c\x46\x02\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x02\x00\xb7\x00:\xff\xff\xff\xff\xff\xff\xff\x00\xff\xff\xff\xff\xff\xff\xff\xff\xfe\xff\xff\xff:/usr/bin/qemu-aarch64-static:\n' \
-            | sudo tee /proc/sys/fs/binfmt_misc/register >/dev/null
 
       - name: Cache Ubuntu Noble chroot with WINE
         id: cache_chroot
