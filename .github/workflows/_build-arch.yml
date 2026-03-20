@@ -147,7 +147,7 @@ jobs:
         uses: actions/cache@v5
         with:
           path: chroot.tar.zst
-          key: alpine-${{ steps.vars.outputs.alpine_arch }}-wine-${{ steps.wine_version.outputs.version }}-v3
+          key: alpine-${{ steps.vars.outputs.alpine_arch }}-wine-${{ steps.wine_version.outputs.version }}-v4
 
       - name: Create Alpine chroot with cross-compiled Wine
         if: steps.cache_chroot.outputs.cache-hit != 'true'
@@ -200,8 +200,10 @@ jobs:
           # stub).  Without it clang adds -lgcc_s to every link and the
           # linker fails to resolve it, causing all AC_LINK_IFELSE tests
           # (including the mandatory 64-bit CAS check) to report "unknown".
+          # Use INPUT(libgcc_s.so.1) — not INPUT(-lgcc_s ...) — to avoid
+          # a circular reference when the linker opens the stub.
           if [ ! -e "${SYSROOT}/usr/lib/libgcc_s.so" ]; then
-            echo 'INPUT(-lgcc_s /usr/lib/libgcc_s.so.1)' \
+            echo 'INPUT(libgcc_s.so.1)' \
               | sudo tee "${SYSROOT}/usr/lib/libgcc_s.so" > /dev/null
           fi
 
@@ -305,6 +307,12 @@ jobs:
             --disable-tests \
             --disable-nls
           make -j"$(nproc)" tools
+          # The cross-build Makefile depends on tools/wine/wine from the host
+          # tools dir.  --enable-win64 produces wine64 instead of wine; create
+          # a compatibility symlink so the cross-build dependency is satisfied.
+          if [ -f tools/wine/wine64 ] && [ ! -f tools/wine/wine ]; then
+            ln -sf wine64 tools/wine/wine
+          fi
           cd ..
 
           # ── 7. Cross-compile Wine for ${MUSL_TARGET} ──────────────────────
@@ -313,7 +321,7 @@ jobs:
           CXX="${MUSL_TARGET}-g++" \
           CFLAGS="-O2 -I${SYSROOT}/usr/include" \
           CXXFLAGS="-O2 -I${SYSROOT}/usr/include" \
-          LDFLAGS="-L${SYSROOT}/usr/lib -Wl,-rpath-link,${SYSROOT}/usr/lib -Wl,-rpath-link,${SYSROOT}/lib" \
+          LDFLAGS="-L${SYSROOT}/usr/lib -Wl,-rpath-link,${SYSROOT}/usr/lib -Wl,-rpath-link,${SYSROOT}/lib -lgcc_s" \
           PKG_CONFIG_LIBDIR="${SYSROOT}/usr/lib/pkgconfig:${SYSROOT}/usr/share/pkgconfig" \
           PKG_CONFIG_SYSROOT_DIR="${SYSROOT}" \
           "$WINE_SRC/configure" \
