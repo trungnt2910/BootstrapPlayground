@@ -147,7 +147,7 @@ jobs:
         uses: actions/cache@v5
         with:
           path: chroot.tar.zst
-          key: alpine-${{ steps.vars.outputs.alpine_arch }}-wine-${{ steps.wine_version.outputs.version }}-v5
+          key: alpine-${{ steps.vars.outputs.alpine_arch }}-wine-${{ steps.wine_version.outputs.version }}-v6
 
       - name: Create Alpine chroot with cross-compiled Wine
         if: steps.cache_chroot.outputs.cache-hit != 'true'
@@ -310,23 +310,21 @@ jobs:
             --disable-tests \
             --disable-nls
           make -j"$(nproc)" tools
-          # In Wine 9/10 with --enable-win64, 'make tools' does not produce
-          # tools/wine/wine or tools/wine/wine64 in the subdirectory.  The
-          # cross-build Makefile depends on that path, so we must create it.
-          # Strategy:
-          #   1. Build the wine64 loader explicitly (fast: just loader/wine.c
-          #      + preloader; PE stubs use mingw-w64 which is pre-installed on
-          #      GitHub Actions ubuntu-latest runners).
-          #   2. Symlink tools/wine/wine → the built binary.
-          #   3. If wine64 still cannot be found, create a placeholder stub
-          #      so 'make' can at least start (it would fail later only if it
-          #      tries to execute the stub, which --disable-tests avoids).
+          # Wine 11.x changed the build system so that 'make tools' may not
+          # build every tool subdirectory (winebuild, widl, wmc, wrc, wine).
+          # Build each tool subdirectory explicitly as a safety net.
+          for subdir in tools/winebuild tools/widl tools/wmc tools/wrc; do
+            make -j"$(nproc)" "${subdir}" 2>/dev/null || true
+          done
+          # The cross-build Makefile depends on tools/wine/wine from the host
+          # tools dir.  --enable-win64 produces wine64 instead of wine; create
+          # a compatibility symlink so the cross-build dependency is satisfied.
           make -j"$(nproc)" wine64 2>/dev/null || \
             make -j"$(nproc)" wine 2>/dev/null || true
           if [ ! -e tools/wine/wine ]; then
             mkdir -p tools/wine
             if [ -f wine64 ]; then
-              # Built at the build root (typical Wine 9/10 layout)
+              # Built at the build root (typical Wine 9/10+ layout)
               ln -sf "$(pwd)/wine64" tools/wine/wine
             elif [ -f wine ]; then
               ln -sf "$(pwd)/wine" tools/wine/wine
@@ -341,14 +339,30 @@ jobs:
           cd ..
 
           # ── 7. Cross-compile Wine for ${MUSL_TARGET} ──────────────────────
+          # Determine the 64-bit CAS configuration variable for Wine's
+          # configure check.  The check tests whether the compiler predefined
+          # macro __GCC_HAVE_SYNC_COMPARE_AND_SWAP_8 is set, which requires
+          # a specific -march flag on some architectures:
+          #   aarch64  – native CAS, no extra flag needed
+          #   arm      – needs -march=armv7-a (ARMv7-A LDREXD/STREXD)
+          #   x86_64   – native (LOCK CMPXCHG8B), no extra flag needed
+          #   i686     – needs -march=i586 (Pentium CMPXCHG8B)
+          # Setting the autoconf cache variable wine_cv_64bit_compare_swap
+          # bypasses the test and tells Wine what CFLAGS to add.
+          case "${MUSL_TARGET}" in
+            arm-linux-musleabihf)  CAS_FLAGS="-march=armv7-a" ;;
+            i686-linux-musl)       CAS_FLAGS="-march=i586" ;;
+            *)                     CAS_FLAGS="none needed" ;;
+          esac
           mkdir wine-cross-build && cd wine-cross-build
           CC="${MUSL_TARGET}-gcc" \
           CXX="${MUSL_TARGET}-g++" \
           CFLAGS="-O2 -I${SYSROOT}/usr/include" \
           CXXFLAGS="-O2 -I${SYSROOT}/usr/include" \
-          LDFLAGS="-L${SYSROOT}/usr/lib -Wl,-rpath-link,${SYSROOT}/usr/lib -Wl,-rpath-link,${SYSROOT}/lib -lgcc_s" \
+          LDFLAGS="-L${SYSROOT}/usr/lib -Wl,-rpath-link,${SYSROOT}/usr/lib -Wl,-rpath-link,${SYSROOT}/lib" \
           PKG_CONFIG_LIBDIR="${SYSROOT}/usr/lib/pkgconfig:${SYSROOT}/usr/share/pkgconfig" \
           PKG_CONFIG_SYSROOT_DIR="${SYSROOT}" \
+          wine_cv_64bit_compare_swap="${CAS_FLAGS}" \
           "$WINE_SRC/configure" \
             --host="${MUSL_TARGET}" \
             --build=x86_64-linux-gnu \
