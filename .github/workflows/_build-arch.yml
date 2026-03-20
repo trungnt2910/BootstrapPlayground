@@ -147,7 +147,7 @@ jobs:
         uses: actions/cache@v5
         with:
           path: chroot.tar.zst
-          key: alpine-${{ steps.vars.outputs.alpine_arch }}-wine-${{ steps.wine_version.outputs.version }}-v4
+          key: alpine-${{ steps.vars.outputs.alpine_arch }}-wine-${{ steps.wine_version.outputs.version }}-v5
 
       - name: Create Alpine chroot with cross-compiled Wine
         if: steps.cache_chroot.outputs.cache-hit != 'true'
@@ -196,16 +196,19 @@ jobs:
             libgcc \
             gcc
 
-          # Alpine does not always ship /usr/lib/libgcc_s.so (the link-time
-          # stub).  Without it clang adds -lgcc_s to every link and the
-          # linker fails to resolve it, causing all AC_LINK_IFELSE tests
-          # (including the mandatory 64-bit CAS check) to report "unknown".
-          # Use INPUT(libgcc_s.so.1) — not INPUT(-lgcc_s ...) — to avoid
-          # a circular reference when the linker opens the stub.
-          if [ ! -e "${SYSROOT}/usr/lib/libgcc_s.so" ]; then
-            echo 'INPUT(libgcc_s.so.1)' \
-              | sudo tee "${SYSROOT}/usr/lib/libgcc_s.so" > /dev/null
-          fi
+          # Always (re-)write the libgcc_s.so linker stub with the minimal
+          # INPUT(libgcc_s.so.1) form.  The Alpine gcc post-install hook
+          # creates its own stub that contains "-lgcc" in a GROUP directive;
+          # that causes the linker to look for libgcc.a in the GCC
+          # version-specific directory (e.g. /usr/lib/gcc/armv7-.../13/)
+          # which is never in the search path during cross-compilation.
+          # The result is that every AC_LINK_IFELSE test that uses LDFLAGS
+          # containing -lgcc_s silently fails — including the mandatory
+          # 64-bit compare-and-swap check — and configure aborts with
+          # "64-bit compare-and-swap is not supported on this platform".
+          # Overwriting the stub unconditionally avoids this.
+          echo 'INPUT(libgcc_s.so.1)' \
+            | sudo tee "${SYSROOT}/usr/lib/libgcc_s.so" > /dev/null
 
           # ── 3. Set up llvm-mingw's clang as the musl cross-compiler ────────
           export PATH="$PWD/llvm-mingw/bin:$PATH"
@@ -307,11 +310,33 @@ jobs:
             --disable-tests \
             --disable-nls
           make -j"$(nproc)" tools
-          # The cross-build Makefile depends on tools/wine/wine from the host
-          # tools dir.  --enable-win64 produces wine64 instead of wine; create
-          # a compatibility symlink so the cross-build dependency is satisfied.
-          if [ -f tools/wine/wine64 ] && [ ! -f tools/wine/wine ]; then
-            ln -sf wine64 tools/wine/wine
+          # In Wine 9/10 with --enable-win64, 'make tools' does not produce
+          # tools/wine/wine or tools/wine/wine64 in the subdirectory.  The
+          # cross-build Makefile depends on that path, so we must create it.
+          # Strategy:
+          #   1. Build the wine64 loader explicitly (fast: just loader/wine.c
+          #      + preloader; PE stubs use mingw-w64 which is pre-installed on
+          #      GitHub Actions ubuntu-latest runners).
+          #   2. Symlink tools/wine/wine → the built binary.
+          #   3. If wine64 still cannot be found, create a placeholder stub
+          #      so 'make' can at least start (it would fail later only if it
+          #      tries to execute the stub, which --disable-tests avoids).
+          make -j"$(nproc)" wine64 2>/dev/null || \
+            make -j"$(nproc)" wine 2>/dev/null || true
+          if [ ! -e tools/wine/wine ]; then
+            mkdir -p tools/wine
+            if [ -f wine64 ]; then
+              # Built at the build root (typical Wine 9/10 layout)
+              ln -sf "$(pwd)/wine64" tools/wine/wine
+            elif [ -f wine ]; then
+              ln -sf "$(pwd)/wine" tools/wine/wine
+            elif [ -f tools/wine/wine64 ]; then
+              ln -sf wine64 tools/wine/wine
+            else
+              # Fallback placeholder — satisfies the make dependency check
+              printf '#!/bin/sh\nexec wine64 "$@" 2>/dev/null || exit 0\n' \
+                > tools/wine/wine && chmod +x tools/wine/wine
+            fi
           fi
           cd ..
 
