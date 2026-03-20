@@ -1,0 +1,65 @@
+{
+  "version": 3,
+  "configurePresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "toolchainFile": "${sourceDir}/cmake/toolchain.cmake",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      }
+    },
+    {
+      "name": "x86",
+      "displayName": "x86 (i686) MinGW",
+      "inherits": "base",
+      "cacheVariables": {
+        "MINGW_ARCH": "i686"
+      }
+    },
+    {
+      "name": "x64",
+      "displayName": "x64 (x86_64) MinGW",
+      "inherits": "base",
+      "cacheVariables": {
+        "MINGW_ARCH": "x86_64"
+      }
+    },
+    {
+      "name": "ARM",
+      "displayName": "ARM (armv7) MinGW",
+      "inherits": "base",
+      "cacheVariables": {
+        "MINGW_ARCH": "armv7"
+      }
+    },
+    {
+      "name": "ARM64",
+      "displayName": "ARM64 (aarch64) MinGW",
+      "inherits": "base",
+      "cacheVariables": {
+        "MINGW_ARCH": "aarch64"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "x86",
+      "configurePreset": "x86"
+    },
+    {
+      "name": "x64",
+      "configurePreset": "x64"
+    },
+    {
+      "name": "ARM",
+      "configurePreset": "ARM"
+    },
+    {
+      "name": "ARM64",
+      "configurePreset": "ARM64"
+    }
+  ]
+}

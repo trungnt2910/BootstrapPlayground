@@ -84,15 +84,26 @@ jobs:
           tar -xf llvm-mingw.tar.xz --strip-components=1 -C llvm-mingw
           rm llvm-mingw.tar.xz
 
-      # ── Cross-compile hello.exe ─────────────────────────────────────────────
+      # ── CMake build ─────────────────────────────────────────────────────────
 
-      - name: Cross-compile hello.exe for ${{ inputs.arch }}
+      - name: Install Ninja
+        run: sudo apt-get install -y ninja-build
+
+      - name: Build with CMake for ${{ inputs.arch }}
         run: |
           export PATH="$PWD/llvm-mingw/bin:$PATH"
-          # Use clang++ explicitly to ensure llvm-mingw's clang is the compiler,
-          # not the system gcc that the generic c++ wrapper might resolve to.
-          "${{ steps.vars.outputs.mingw_arch }}-w64-mingw32-clang++" \
-            -static -o hello.exe hello.cpp
+          cmake -B build -G Ninja \
+            -DCMAKE_TOOLCHAIN_FILE="$PWD/cmake/toolchain.cmake" \
+            -DMINGW_ARCH="${{ steps.vars.outputs.mingw_arch }}" \
+            -DCMAKE_BUILD_TYPE=Release
+          cmake --build build
+
+      - name: Locate build outputs
+        id: outputs
+        run: |
+          echo "hello_exe=$PWD/build/hello.exe"                       >> "$GITHUB_OUTPUT"
+          echo "test_host_exe=$PWD/build/test_host/test_host.exe"     >> "$GITHUB_OUTPUT"
+          echo "test_driver_sys=$PWD/build/test_driver/test_driver.sys" >> "$GITHUB_OUTPUT"
 
       # ── QEMU + Debian chroot + WINE ─────────────────────────────────────────
 
@@ -146,11 +157,11 @@ jobs:
 
       # ── Run under emulation ─────────────────────────────────────────────────
 
-      - name: Run hello.exe on WINE (${{ inputs.arch }})
+      - name: Run hello.exe and test_host.exe on WINE (${{ inputs.arch }})
         run: |
           # Bind-mount /proc, /dev, and the workspace into the chroot so that
-          # Wine's wineserver can access kernel interfaces and hello.exe is
-          # accessible at /mnt/work/hello.exe inside the chroot.
+          # Wine's wineserver can access kernel interfaces and the binaries are
+          # accessible at /mnt/work/... inside the chroot.
           sudo mkdir -p rootfs/mnt/work
           sudo mount --bind /proc  rootfs/proc
           sudo mount --bind /dev   rootfs/dev
@@ -159,6 +170,9 @@ jobs:
                 sudo umount rootfs/dev        2>/dev/null || true
                 sudo umount rootfs/proc       2>/dev/null || true' EXIT
 
+          WINE_DLL_PATH="/usr/lib/${{ steps.vars.outputs.debian_multiarch }}/wine"
+          WINE_ARCH="${{ steps.vars.outputs.wine_arch }}"
+
           # Step 1: Warm-up run to initialize the Wine prefix.
           # On the very first run Wine runs wineboot.exe internally to set up the
           # Windows registry and virtual filesystem.  After initialization,
@@ -166,25 +180,34 @@ jobs:
           # required") and Wine exits without running the requested program.
           # We tolerate any exit code here; the purpose is only to populate the
           # prefix so the real run below can skip initialization entirely.
-          # WINEDLLPATH must be set inside the chroot environment (after chroot)
-          # so that it refers to paths within the chroot, not the host.
           sudo chroot rootfs \
             env HOME=/tmp WINEDEBUG=-all \
-                WINEDLLPATH=/usr/lib/${{ steps.vars.outputs.debian_multiarch }}/wine \
-                WINEARCH=${{ steps.vars.outputs.wine_arch }} \
-            wine /mnt/work/hello.exe 2>&1 | head -20 || true
+                WINEDLLPATH="$WINE_DLL_PATH" \
+                WINEARCH="$WINE_ARCH" \
+            wine /mnt/work/build/hello.exe 2>&1 | head -20 || true
 
           # Wait for wineserver to shut down cleanly before starting a new session.
           sudo chroot rootfs env HOME=/tmp wineserver -w
 
           # Step 2: Run hello.exe for real.
-          # The prefix is now fully initialized so Wine skips wineboot and
-          # executes hello.exe directly.
           sudo chroot rootfs \
             env HOME=/tmp WINEDEBUG=-all \
-                WINEDLLPATH=/usr/lib/${{ steps.vars.outputs.debian_multiarch }}/wine \
-                WINEARCH=${{ steps.vars.outputs.wine_arch }} \
-            wine /mnt/work/hello.exe
+                WINEDLLPATH="$WINE_DLL_PATH" \
+                WINEARCH="$WINE_ARCH" \
+            wine /mnt/work/build/hello.exe
+
+          # Wait for wineserver before the next session.
+          sudo chroot rootfs env HOME=/tmp wineserver -w
+
+          # Step 3: Run the driver test host.
+          # The driver .sys path is passed as a Windows-style path via Wine's Z: drive,
+          # which maps the root filesystem.  Use forward slashes for portability.
+          sudo chroot rootfs \
+            env HOME=/tmp WINEDEBUG=-all \
+                WINEDLLPATH="$WINE_DLL_PATH" \
+                WINEARCH="$WINE_ARCH" \
+            wine /mnt/work/build/test_host/test_host.exe \
+            'Z:\mnt\work\build\test_driver\test_driver.sys'
 
       # ── Artifact upload ─────────────────────────────────────────────────────
 
@@ -192,6 +215,9 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: hello-${{ inputs.arch }}
-          path: hello.exe
+          name: binaries-${{ inputs.arch }}
+          path: |
+            build/hello.exe
+            build/test_host/test_host.exe
+            build/test_driver/test_driver.sys
           if-no-files-found: ignore
