@@ -233,19 +233,28 @@ jobs:
             gcc
 
           # ── 3. Set up llvm-mingw's clang as the musl cross-compiler ───────────
-          # llvm-mingw (already downloaded for the MinGW build) ships clang and
-          # lld which support all LLVM targets including arm-linux-musleabihf and
-          # aarch64-linux-musl.  We create thin wrapper scripts named
-          # ${MUSL_TARGET}-gcc / ${MUSL_TARGET}-g++ so that autoconf's --host
-          # prefix search finds the compiler without a traditional GCC package.
+          # llvm-mingw ships clang for all LLVM targets (compilation), but its
+          # lld has trouble linking Linux ELF against musl's libc.so linker
+          # script (GROUP directive). Use Ubuntu's architecture-matched GNU ld
+          # (arm-linux-gnueabihf-ld / aarch64-linux-gnu-ld) for the link step;
+          # GNU ld handles musl's linker scripts correctly and supports --sysroot.
           export PATH="$PWD/llvm-mingw/bin:$PATH"
           mkdir -p _musl_cross/bin
 
+          # Select the Ubuntu cross-linker that matches our musl target arch.
+          if [ "${MUSL_TARGET}" = "arm-linux-musleabihf" ]; then
+            CROSS_LD_BIN="/usr/bin/arm-linux-gnueabihf-ld"
+          else
+            CROSS_LD_BIN="/usr/bin/aarch64-linux-gnu-ld"
+          fi
+
           # gcc/g++ wrappers: embed absolute paths so they work from any cwd
-          printf '#!/bin/sh\nexec clang --target=%s --sysroot=%s -fuse-ld=lld "$@"\n' \
-            "${MUSL_TARGET}" "${SYSROOT}" > "_musl_cross/bin/${MUSL_TARGET}-gcc"
-          printf '#!/bin/sh\nexec clang++ --target=%s --sysroot=%s -fuse-ld=lld "$@"\n' \
-            "${MUSL_TARGET}" "${SYSROOT}" > "_musl_cross/bin/${MUSL_TARGET}-g++"
+          printf '#!/bin/sh\nexec clang --target=%s --sysroot=%s -fuse-ld=%s "$@"\n' \
+            "${MUSL_TARGET}" "${SYSROOT}" "${CROSS_LD_BIN}" \
+            > "_musl_cross/bin/${MUSL_TARGET}-gcc"
+          printf '#!/bin/sh\nexec clang++ --target=%s --sysroot=%s -fuse-ld=%s "$@"\n' \
+            "${MUSL_TARGET}" "${SYSROOT}" "${CROSS_LD_BIN}" \
+            > "_musl_cross/bin/${MUSL_TARGET}-g++"
           chmod +x "_musl_cross/bin/${MUSL_TARGET}-gcc" \
                    "_musl_cross/bin/${MUSL_TARGET}-g++"
 
@@ -267,10 +276,15 @@ jobs:
               "${SYSROOT}/usr/lib/gcc/${MUSL_TARGET}"
           fi
 
-          # ── 4. Host build dependencies (flex, bison) ───────────────────────
-          # Wine's build system uses flex (for widl's lexer) and bison (for
-          # widl/wrc parsers).  These must be available on the build host.
-          sudo apt-get install -y flex bison
+          # ── 4. Host build dependencies ────────────────────────────────────
+          # flex/bison: Wine's widl/wrc parsers require them on the build host.
+          # binutils-*: Ubuntu cross-linkers used by our clang wrappers above.
+          if [ "${MUSL_TARGET}" = "arm-linux-musleabihf" ]; then
+            CROSS_LD_PKG="binutils-arm-linux-gnueabihf"
+          else
+            CROSS_LD_PKG="binutils-aarch64-linux-gnu"
+          fi
+          sudo apt-get install -y flex bison "${CROSS_LD_PKG}"
 
           # ── 5. Wine source ─────────────────────────────────────────────────
           curl -fL \
