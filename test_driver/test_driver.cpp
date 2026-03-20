@@ -14,6 +14,14 @@ typedef unsigned short USHORT;
 typedef wchar_t WCHAR;
 typedef void* PVOID;
 
+// On x86 Windows the kernel ABI uses __stdcall (callee-cleans-stack).
+// On every other architecture it is a no-op.
+#if defined(_M_IX86) || defined(__i386__)
+#  define NTAPI __stdcall
+#else
+#  define NTAPI
+#endif
+
 // Minimal UNICODE_STRING matching Windows ABI.
 struct UNICODE_STRING {
     USHORT Length;
@@ -27,16 +35,17 @@ typedef UNICODE_STRING* PUNICODE_STRING;
 
 // ---- Imported kernel functions ------------------------------------------
 
+// DbgPrintEx is variadic – variadic functions cannot use NTAPI (__stdcall).
 extern "C" ULONG DbgPrintEx(ULONG ComponentId, ULONG Level,
                               const char* Format, ...);
 
-extern "C" NTSTATUS LxInitialize(PDRIVER_OBJECT DriverObject,
-                                  PVOID Subsystem);
+extern "C" NTSTATUS NTAPI LxInitialize(PDRIVER_OBJECT DriverObject,
+                                        PVOID Subsystem);
 
 // ---- DriverEntry --------------------------------------------------------
 
-extern "C" NTSTATUS DriverEntry(PDRIVER_OBJECT DriverObject,
-                                 PUNICODE_STRING RegistryPath) {
+extern "C" NTSTATUS NTAPI DriverEntry(PDRIVER_OBJECT DriverObject,
+                                       PUNICODE_STRING RegistryPath) {
     // Suppress unused-parameter warnings.
     (void)RegistryPath;
 

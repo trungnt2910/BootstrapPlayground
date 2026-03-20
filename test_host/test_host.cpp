@@ -37,32 +37,29 @@ extern "C" NTSTATUS NTAPI LxInitialize(PDRIVER_OBJECT /*driverObject*/,
 }
 
 // ---------------------------------------------------------------------------
-// Helper: resolve the driver path
-// ---------------------------------------------------------------------------
-
-static std::string resolve_driver_path(int argc, char* argv[]) {
-    if (argc >= 2) return argv[1];
-
-    // Default: look for test_driver.sys next to the executable.
-    char exe_path[MAX_PATH] = {};
-    GetModuleFileNameA(nullptr, exe_path, MAX_PATH);
-
-    std::string path(exe_path);
-    const auto slash = path.find_last_of("/\\");
-    if (slash != std::string::npos)
-        path.resize(slash + 1);
-    else
-        path.clear();
-    path += "test_driver.sys";
-    return path;
-}
-
-// ---------------------------------------------------------------------------
 // main
 // ---------------------------------------------------------------------------
 
 int main(int argc, char* argv[]) {
-    const std::string driver_path = resolve_driver_path(argc, argv);
+    // Resolve the driver path without returning std::string from a helper.
+    // Returning a non-trivially-copyable type like std::string by value from
+    // a separate function involves a hidden-pointer ABI that can be
+    // unreliable under Wine/QEMU on some architectures.  Building the path
+    // directly inside main avoids the issue entirely.
+    char default_exe_path[MAX_PATH] = {};
+    std::string driver_path;
+    if (argc >= 2) {
+        driver_path = argv[1];
+    } else {
+        GetModuleFileNameA(nullptr, default_exe_path, MAX_PATH);
+        driver_path = default_exe_path;
+        const auto slash = driver_path.find_last_of("/\\");
+        if (slash != std::string::npos)
+            driver_path.resize(slash + 1);
+        else
+            driver_path.clear();
+        driver_path += "test_driver.sys";
+    }
 
     std::fprintf(stderr, "[test_host] Loading driver: %s\n", driver_path.c_str());
 

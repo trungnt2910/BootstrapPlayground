@@ -310,26 +310,46 @@ void DriverLoader::apply_relocations() {
                 break;
             }
             case IMAGE_REL_BASED_THUMB_MOV32: {
-                // ARM THUMB MOV32 relocation: two consecutive THUMB2 instructions.
-                // Each instruction pair encodes a 16-bit half of the absolute address.
+                // ARM Thumb-2 MOV32 relocation: a MOVW/MOVT pair that together
+                // encode a 32-bit absolute address.
+                //
+                // Each 32-bit Thumb-2 instruction is stored in memory as two
+                // consecutive little-endian 16-bit halfwords.  When read as a
+                // DWORD the first halfword occupies bits [15:0] and the second
+                // halfword occupies bits [31:16].
+                //
+                // For MOVW/MOVT (T3 encoding per ARM DDI 0406):
+                //   first halfword:  1111 0i10 0100 imm4  (bits [15:0] of DWORD)
+                //   second halfword: 0 imm3 Rd imm8       (bits [31:16] of DWORD)
+                //
+                // imm16 bit positions inside the DWORD:
+                //   imm4 → DWORD bits  [3:0]
+                //   i    → DWORD bit  [10]
+                //   imm3 → DWORD bits [30:28]
+                //   imm8 → DWORD bits [23:16]
+                //   imm16 = (imm4<<12) | (i<<11) | (imm3<<8) | imm8
                 auto* p = reinterpret_cast<DWORD*>(
                     static_cast<char*>(page_base) + offset);
-                // Decode current value from instruction encoding.
                 auto decode_thumb_imm16 = [](DWORD insn) -> WORD {
-                    // MOVW/MOVT: imm16 = imm4 | imm3 | i | imm8
-                    WORD imm4 = static_cast<WORD>((insn >> 16) & 0xF);
-                    WORD imm3 = static_cast<WORD>((insn >>  4) & 0x7);
-                    WORD i    = static_cast<WORD>((insn >> 26) & 0x1);
-                    WORD imm8 = static_cast<WORD>( insn        & 0xFF);
+                    const WORD imm4 = static_cast<WORD>( insn        & 0x000FU);
+                    const WORD i    = static_cast<WORD>((insn >> 10) & 0x0001U);
+                    const WORD imm3 = static_cast<WORD>((insn >> 28) & 0x0007U);
+                    const WORD imm8 = static_cast<WORD>((insn >> 16) & 0x00FFU);
                     return static_cast<WORD>((imm4 << 12) | (i << 11) |
-                                             (imm3 << 8)  |  imm8);
+                                             (imm3 <<  8) |  imm8);
                 };
                 auto encode_thumb_imm16 = [](DWORD insn, WORD imm16) -> DWORD {
-                    insn &= 0xFBF08F00U;
-                    insn |= (static_cast<DWORD>(imm16 & 0xF000) << 4);
-                    insn |= (static_cast<DWORD>(imm16 & 0x0800) << 15);
-                    insn |= (static_cast<DWORD>(imm16 & 0x0700) << 4);
-                    insn |=  static_cast<DWORD>(imm16 & 0x00FF);
+                    // Clear the four bit-fields that carry imm16.
+                    const DWORD mask =
+                        0x000FU            |   // imm4  → bits  [3:0]
+                        (0x0001U << 10)    |   // i     → bit  [10]
+                        (0x0007U << 28)    |   // imm3  → bits [30:28]
+                        (0x00FFU << 16);       // imm8  → bits [23:16]
+                    insn &= ~mask;
+                    insn |= static_cast<DWORD>( (imm16 >> 12) & 0xFU);
+                    insn |= static_cast<DWORD>(((imm16 >> 11) & 0x1U) << 10);
+                    insn |= static_cast<DWORD>(((imm16 >>  8) & 0x7U) << 28);
+                    insn |= static_cast<DWORD>(  (imm16       & 0xFFU) << 16);
                     return insn;
                 };
                 WORD lo = decode_thumb_imm16(p[0]);
@@ -503,10 +523,18 @@ NTSTATUS DriverLoader::call_driver_entry(std::wstring_view registry_path) {
     m_registry_path_str.MaximumLength = m_registry_path_str.Length;
 
     // ---- Call DriverEntry ----------------------------------------------
+    // Build the entry-point address.  On ARM32 (Thumb-2) the PE entry-point
+    // RVA addresses the actual code but does NOT include the Thumb
+    // interworking bit (bit 0).  We must set it so that an indirect branch
+    // (BLX Rx) will switch the CPU to Thumb mode before executing the code.
     using DriverEntryFn = NTSTATUS (NTAPI*)(PDRIVER_OBJECT, PUNICODE_STRING);
-    auto* entry = reinterpret_cast<DriverEntryFn>(
+    auto entry_addr = reinterpret_cast<ULONG_PTR>(
         static_cast<char*>(m_base) +
         nth->OptionalHeader.AddressOfEntryPoint);
+#if defined(_M_ARM) || defined(__arm__)
+    entry_addr |= 1U;  // set Thumb interworking bit
+#endif
+    auto* entry = reinterpret_cast<DriverEntryFn>(entry_addr);
 
     return entry(&m_driver_object, &m_registry_path_str);
 }
