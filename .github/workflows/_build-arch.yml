@@ -25,16 +25,16 @@ jobs:
             x86)
               echo "mingw_arch=i686"                        >> "$GITHUB_OUTPUT"
               echo "alpine_arch=x86"                        >> "$GITHUB_OUTPUT"
+              echo "musl_target=i686-linux-musl"            >> "$GITHUB_OUTPUT"
               echo "wine_arch=win32"                        >> "$GITHUB_OUTPUT"
               echo "pwsh_arch=x86"                          >> "$GITHUB_OUTPUT"
-              echo "wine_cross=false"                       >> "$GITHUB_OUTPUT"
               ;;
             x64)
               echo "mingw_arch=x86_64"                      >> "$GITHUB_OUTPUT"
               echo "alpine_arch=x86_64"                     >> "$GITHUB_OUTPUT"
+              echo "musl_target=x86_64-linux-musl"          >> "$GITHUB_OUTPUT"
               echo "wine_arch=win64"                        >> "$GITHUB_OUTPUT"
               echo "pwsh_arch=x64"                          >> "$GITHUB_OUTPUT"
-              echo "wine_cross=false"                       >> "$GITHUB_OUTPUT"
               ;;
             ARM)
               echo "mingw_arch=armv7"                       >> "$GITHUB_OUTPUT"
@@ -42,7 +42,6 @@ jobs:
               echo "musl_target=arm-linux-musleabihf"       >> "$GITHUB_OUTPUT"
               echo "wine_arch=win32"                        >> "$GITHUB_OUTPUT"
               echo "pwsh_arch=arm32"                        >> "$GITHUB_OUTPUT"
-              echo "wine_cross=true"                        >> "$GITHUB_OUTPUT"
               ;;
             ARM64)
               echo "mingw_arch=aarch64"                     >> "$GITHUB_OUTPUT"
@@ -50,7 +49,6 @@ jobs:
               echo "musl_target=aarch64-linux-musl"         >> "$GITHUB_OUTPUT"
               echo "wine_arch=win64"                        >> "$GITHUB_OUTPUT"
               echo "pwsh_arch=arm64"                        >> "$GITHUB_OUTPUT"
-              echo "wine_cross=true"                        >> "$GITHUB_OUTPUT"
               ;;
           esac
 
@@ -115,18 +113,20 @@ jobs:
           echo "QEMU arm  : $(qemu-arm-static     --version | head -1)"
           echo "QEMU arm64: $(qemu-aarch64-static --version | head -1)"
 
-      # ── Alpine chroot + Wine ─────────────────────────────────────────────────
+      # ── Alpine chroot + Wine (all architectures) ───────────────────────────────
       #
-      # For x86/x64: use Alpine's pre-built wine package from the community
-      # repository.  Alpine builds wine against musl libc so it runs in the
-      # lightweight Alpine chroot without any Ubuntu-specific dependencies.
+      # All four architectures (x86, x64, ARM, ARM64) use the same approach:
+      #   1. Download the latest Alpine mini rootfs for the target architecture
+      #   2. Install musl-dev + gcc into the rootfs to serve as cross-compile sysroot
+      #   3. Build Wine host tools (x86_64 ELF binaries) using the Ubuntu host GCC
+      #   4. Cross-compile Wine from source with the llvm-mingw clang wrapper
+      #   5. Install Wine into the Alpine rootfs and pack as chroot.tar.zst
       #
-      # For ARM/ARM64: Alpine does not ship a wine package for those arches.
-      # We cross-compile the latest stable Wine from source using a musl.cc
-      # GCC cross-toolchain (arm-linux-musleabihf or aarch64-linux-musl) with
-      # the Alpine ARM rootfs as the target sysroot.  Only the features needed
-      # for running console PE binaries (like PowerShell) are enabled; graphics,
-      # sound, and most optional subsystems are disabled to keep the build fast.
+      # Linker selection:
+      #   x86 / x64  — lld from llvm-mingw (handles elf_i386 / elf_x86_64 well)
+      #   ARM / ARM64 — Ubuntu cross-binutils (arm-linux-gnueabihf-ld /
+      #                 aarch64-linux-gnu-ld); these handle ARM ELF + musl's
+      #                 libc.so GROUP linker script more reliably than lld.
 
       - name: Get latest Wine stable version
         id: wine_version
@@ -147,51 +147,10 @@ jobs:
         uses: actions/cache@v5
         with:
           path: chroot.tar.zst
-          key: alpine-${{ steps.vars.outputs.alpine_arch }}-wine-${{ steps.wine_version.outputs.version }}-v2
+          key: alpine-${{ steps.vars.outputs.alpine_arch }}-wine-${{ steps.wine_version.outputs.version }}-v3
 
-      # ── x86/x64: build chroot with apk wine ────────────────────────────────
-
-      - name: Create Alpine chroot (x86/x64)
-        if: steps.cache_chroot.outputs.cache-hit != 'true' && steps.vars.outputs.wine_cross == 'false'
-        run: |
-          set -e
-          ALPINE_ARCH="${{ steps.vars.outputs.alpine_arch }}"
-          ALPINE_MIRROR="https://dl-cdn.alpinelinux.org/alpine/latest-stable"
-
-          # Download the latest Alpine mini rootfs for this architecture.
-          FILE=$(curl -fsSL "${ALPINE_MIRROR}/releases/${ALPINE_ARCH}/latest-releases.yaml" \
-            | awk '/flavor: alpine-minirootfs/{found=1} found && /file:/{print $2; found=0}' \
-            | head -1)
-          curl -fL "${ALPINE_MIRROR}/releases/${ALPINE_ARCH}/${FILE}" \
-            -o alpine-rootfs.tar.gz
-          sudo mkdir -p rootfs
-          sudo tar -xzf alpine-rootfs.tar.gz -C rootfs
-          rm alpine-rootfs.tar.gz
-
-          # Set up name resolution and Alpine repositories (main + community).
-          # wine is in the community repository.
-          echo "nameserver 8.8.8.8" | sudo tee rootfs/etc/resolv.conf > /dev/null
-          printf '%s/main\n%s/community\n' \
-            "$ALPINE_MIRROR" "$ALPINE_MIRROR" \
-            | sudo tee rootfs/etc/apk/repositories > /dev/null
-
-          # Run apk without mounting /proc or /dev.  Alpine's musl-based packages
-          # do not use ld.so.cache or other proc-dependent mechanisms, so post-
-          # install scripts work fine without the bind mounts.
-          # Use --no-scripts to skip any package that requires proc/sysfs.
-          sudo chroot rootfs apk update
-          sudo chroot rootfs apk add --no-cache --no-scripts wine
-
-          # Exclude /proc and /dev from the archive to avoid capturing virtual-
-          # filesystem files (which are write-only or produce EPERM on read).
-          sudo tar --zstd -cf chroot.tar.zst \
-            --exclude='./proc/*' --exclude='./dev/*' \
-            -C rootfs .
-
-      # ── ARM/ARM64: cross-compile Wine from source ───────────────────────────
-
-      - name: Create Alpine chroot with cross-compiled Wine (ARM/ARM64)
-        if: steps.cache_chroot.outputs.cache-hit != 'true' && steps.vars.outputs.wine_cross == 'true'
+      - name: Create Alpine chroot with cross-compiled Wine
+        if: steps.cache_chroot.outputs.cache-hit != 'true'
         run: |
           set -e
           ALPINE_ARCH="${{ steps.vars.outputs.alpine_arch }}"
@@ -201,7 +160,7 @@ jobs:
           WINE_MAJOR="${{ steps.wine_version.outputs.major }}"
           SYSROOT="$PWD/rootfs"
 
-          # ── 1. Alpine ARM mini rootfs ──────────────────────────────────────
+          # ── 1. Alpine mini rootfs ──────────────────────────────────────────
           FILE=$(curl -fsSL "${ALPINE_MIRROR}/releases/${ALPINE_ARCH}/latest-releases.yaml" \
             | awk '/flavor: alpine-minirootfs/{found=1} found && /file:/{print $2; found=0}' \
             | head -1)
@@ -217,36 +176,39 @@ jobs:
             | sudo tee "$SYSROOT/etc/apk/repositories" > /dev/null
 
           # ── 2. Install Wine build dependencies into the sysroot ────────────
-          # Use the QEMU-emulated ARM chroot to run apk and install target-arch
-          # development libraries into the rootfs.  These serve as both the
-          # cross-compilation sysroot and the runtime environment for Wine.
-          # musl-dev provides CRT startup files (crt1.o etc.) and static musl.
-          # gcc provides the libgcc_s.so linker stub needed to resolve -lgcc_s
-          # at link time.  libgcc provides the libgcc_s.so.1 runtime itself.
-          # Use --no-scripts to skip any post-install hook that needs /proc.
+          # Run apk inside the chroot (via QEMU for ARM, native for x86/x64).
+          # Do NOT pass --no-scripts: gcc's post-install script creates
+          # /usr/lib/libgcc_s.so which lld needs to resolve -lgcc_s at link
+          # time (without it every configure link test fails).  Alpine's musl-
+          # based packages do not touch /proc in their install scripts, so no
+          # bind-mount is needed.
           sudo chroot "$SYSROOT" apk update
-          sudo chroot "$SYSROOT" apk add --no-cache --no-scripts \
+          sudo chroot "$SYSROOT" apk add --no-cache \
             musl-dev \
-            freetype-dev \
             zlib-dev \
             libgcc \
             gcc
 
-          # ── 3. Set up llvm-mingw's clang as the musl cross-compiler ───────────
-          # llvm-mingw ships clang for all LLVM targets (compilation), but its
-          # lld has trouble linking Linux ELF against musl's libc.so linker
-          # script (GROUP directive). Use Ubuntu's architecture-matched GNU ld
-          # (arm-linux-gnueabihf-ld / aarch64-linux-gnu-ld) for the link step;
-          # GNU ld handles musl's linker scripts correctly and supports --sysroot.
+          # ── 3. Set up llvm-mingw's clang as the musl cross-compiler ────────
           export PATH="$PWD/llvm-mingw/bin:$PATH"
           mkdir -p _musl_cross/bin
 
-          # Select the Ubuntu cross-linker that matches our musl target arch.
-          if [ "${MUSL_TARGET}" = "arm-linux-musleabihf" ]; then
-            CROSS_LD_BIN="/usr/bin/arm-linux-gnueabihf-ld"
-          else
-            CROSS_LD_BIN="/usr/bin/aarch64-linux-gnu-ld"
-          fi
+          # Select the appropriate linker for the target architecture.
+          # x86 / x64: lld from llvm-mingw (x86 ELF targets work fine).
+          # ARM / ARM64: Ubuntu cross-binutils ld; these handle ARM ELF and
+          #   musl's libc.so GROUP linker script more reliably than lld.
+          case "${MUSL_TARGET}" in
+            arm-linux-musleabihf)
+              CROSS_LD_BIN="/usr/bin/arm-linux-gnueabihf-ld"
+              CROSS_LD_PKG="binutils-arm-linux-gnueabihf" ;;
+            aarch64-linux-musl)
+              CROSS_LD_BIN="/usr/bin/aarch64-linux-gnu-ld"
+              CROSS_LD_PKG="binutils-aarch64-linux-gnu" ;;
+            *)
+              # i686-linux-musl or x86_64-linux-musl: use lld from llvm-mingw
+              CROSS_LD_BIN="lld"
+              CROSS_LD_PKG="" ;;
+          esac
 
           # gcc/g++ wrappers: embed absolute paths so they work from any cwd
           printf '#!/bin/sh\nexec clang --target=%s --sysroot=%s -fuse-ld=%s "$@"\n' \
@@ -278,13 +240,8 @@ jobs:
 
           # ── 4. Host build dependencies ────────────────────────────────────
           # flex/bison: Wine's widl/wrc parsers require them on the build host.
-          # binutils-*: Ubuntu cross-linkers used by our clang wrappers above.
-          if [ "${MUSL_TARGET}" = "arm-linux-musleabihf" ]; then
-            CROSS_LD_PKG="binutils-arm-linux-gnueabihf"
-          else
-            CROSS_LD_PKG="binutils-aarch64-linux-gnu"
-          fi
-          sudo apt-get install -y flex bison "${CROSS_LD_PKG}"
+          # CROSS_LD_PKG: Ubuntu cross-linker for ARM/ARM64 (empty for x86/x64).
+          sudo apt-get install -y flex bison ${CROSS_LD_PKG}
 
           # ── 5. Wine source ─────────────────────────────────────────────────
           curl -fL \
@@ -295,12 +252,11 @@ jobs:
           WINE_SRC="$PWD/wine-${WINE_VERSION}"
 
           # ── 6. Build Wine host tools ───────────────────────────────────────
-          # Wine's cross-compilation requires host (x86_64) binaries for
-          # winebuild, widl, wmc, and wrc.  Always enable --enable-win64 so the
-          # configure check for 'gcc -m32' is skipped (Ubuntu runners lack 32-bit
-          # development libraries).  winebuild can still generate ARM32 PE stubs
-          # when invoked with the correct --target flag; the host-tools bitness
-          # only affects the ELF wrappers, not PE output.
+          # Wine cross-compilation needs host (x86_64 ELF) binaries for
+          # winebuild, widl, wmc, and wrc.  Always use --enable-win64 so the
+          # configure check for 'gcc -m32' is skipped (Ubuntu runners lack
+          # 32-bit development libraries).  winebuild generates target-arch PE
+          # stubs based on --target flags, independent of the host bitness.
           mkdir wine-tools-build && cd wine-tools-build
           "$WINE_SRC/configure" \
             --enable-win64 \
@@ -335,10 +291,6 @@ jobs:
           cd ..
 
           # ── 7. Cross-compile Wine for ${MUSL_TARGET} ──────────────────────
-          # zlib is the only library dependency we keep; freetype is disabled so
-          # no font-related configure checks need to pass through the sysroot.
-          # PKG_CONFIG_SYSROOT_DIR causes pkg-config to prepend the sysroot
-          # path to all returned -I and -L flags.
           mkdir wine-cross-build && cd wine-cross-build
           CC="${MUSL_TARGET}-gcc" \
           CXX="${MUSL_TARGET}-g++" \
@@ -385,7 +337,7 @@ jobs:
 
           # ── 8. Pack the chroot ─────────────────────────────────────────────
           # Exclude /proc and /dev to avoid capturing virtual-filesystem files
-          # that are write-only or produce EPERM when read by tar.
+          # (write-only kernel files produce EPERM/EACCES when read by tar).
           sudo tar --zstd -cf chroot.tar.zst \
             --exclude='./proc/*' --exclude='./dev/*' \
             -C rootfs .
