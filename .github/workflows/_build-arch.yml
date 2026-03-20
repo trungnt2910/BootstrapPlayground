@@ -23,36 +23,34 @@ jobs:
         run: |
           case "${{ inputs.arch }}" in
             x86)
-              echo "mingw_arch=i686"                       >> "$GITHUB_OUTPUT"
-              echo "debian_arch=i386"                      >> "$GITHUB_OUTPUT"
-              echo "debian_multiarch=i386-linux-gnu"       >> "$GITHUB_OUTPUT"
-              echo "wine_arch=win32"                       >> "$GITHUB_OUTPUT"
-              echo "pwsh_arch=x86"                         >> "$GITHUB_OUTPUT"
-              echo "ubuntu_mirror=http://archive.ubuntu.com/ubuntu" >> "$GITHUB_OUTPUT"
+              echo "mingw_arch=i686"                        >> "$GITHUB_OUTPUT"
+              echo "alpine_arch=x86"                        >> "$GITHUB_OUTPUT"
+              echo "wine_arch=win32"                        >> "$GITHUB_OUTPUT"
+              echo "pwsh_arch=x86"                          >> "$GITHUB_OUTPUT"
+              echo "wine_cross=false"                       >> "$GITHUB_OUTPUT"
               ;;
             x64)
-              echo "mingw_arch=x86_64"                     >> "$GITHUB_OUTPUT"
-              echo "debian_arch=amd64"                     >> "$GITHUB_OUTPUT"
-              echo "debian_multiarch=x86_64-linux-gnu"     >> "$GITHUB_OUTPUT"
-              echo "wine_arch=win64"                       >> "$GITHUB_OUTPUT"
-              echo "pwsh_arch=x64"                         >> "$GITHUB_OUTPUT"
-              echo "ubuntu_mirror=http://archive.ubuntu.com/ubuntu" >> "$GITHUB_OUTPUT"
+              echo "mingw_arch=x86_64"                      >> "$GITHUB_OUTPUT"
+              echo "alpine_arch=x86_64"                     >> "$GITHUB_OUTPUT"
+              echo "wine_arch=win64"                        >> "$GITHUB_OUTPUT"
+              echo "pwsh_arch=x64"                          >> "$GITHUB_OUTPUT"
+              echo "wine_cross=false"                       >> "$GITHUB_OUTPUT"
               ;;
             ARM)
-              echo "mingw_arch=armv7"                      >> "$GITHUB_OUTPUT"
-              echo "debian_arch=armhf"                     >> "$GITHUB_OUTPUT"
-              echo "debian_multiarch=arm-linux-gnueabihf"  >> "$GITHUB_OUTPUT"
-              echo "wine_arch=win32"                       >> "$GITHUB_OUTPUT"
-              echo "pwsh_arch=arm32"                       >> "$GITHUB_OUTPUT"
-              echo "ubuntu_mirror=http://ports.ubuntu.com/ubuntu-ports" >> "$GITHUB_OUTPUT"
+              echo "mingw_arch=armv7"                       >> "$GITHUB_OUTPUT"
+              echo "alpine_arch=armv7"                      >> "$GITHUB_OUTPUT"
+              echo "musl_target=arm-linux-musleabihf"       >> "$GITHUB_OUTPUT"
+              echo "wine_arch=win32"                        >> "$GITHUB_OUTPUT"
+              echo "pwsh_arch=arm32"                        >> "$GITHUB_OUTPUT"
+              echo "wine_cross=true"                        >> "$GITHUB_OUTPUT"
               ;;
             ARM64)
-              echo "mingw_arch=aarch64"                    >> "$GITHUB_OUTPUT"
-              echo "debian_arch=arm64"                     >> "$GITHUB_OUTPUT"
-              echo "debian_multiarch=aarch64-linux-gnu"    >> "$GITHUB_OUTPUT"
-              echo "wine_arch=win64"                       >> "$GITHUB_OUTPUT"
-              echo "pwsh_arch=arm64"                       >> "$GITHUB_OUTPUT"
-              echo "ubuntu_mirror=http://ports.ubuntu.com/ubuntu-ports" >> "$GITHUB_OUTPUT"
+              echo "mingw_arch=aarch64"                     >> "$GITHUB_OUTPUT"
+              echo "alpine_arch=aarch64"                    >> "$GITHUB_OUTPUT"
+              echo "musl_target=aarch64-linux-musl"         >> "$GITHUB_OUTPUT"
+              echo "wine_arch=win64"                        >> "$GITHUB_OUTPUT"
+              echo "pwsh_arch=arm64"                        >> "$GITHUB_OUTPUT"
+              echo "wine_cross=true"                        >> "$GITHUB_OUTPUT"
               ;;
           esac
 
@@ -79,10 +77,6 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           TAG="${{ steps.llvm_release.outputs.tag }}"
-          # Select the UCRT Ubuntu x86_64 tarball.  When multiple Ubuntu versions
-          # are published for the same release, sort_by(.name) picks the oldest
-          # Ubuntu version first (e.g. ubuntu-20.04 before ubuntu-22.04) for
-          # maximum runner compatibility.
           URL=$(gh api "repos/mstorsjo/llvm-mingw/releases/tags/${TAG}" \
             --jq '[.assets[]
                    | select(.name | test("ucrt-ubuntu-.*-x86_64\\.tar\\.xz$"))]
@@ -97,8 +91,6 @@ jobs:
       - name: Cross-compile hello.exe for ${{ inputs.arch }}
         run: |
           export PATH="$PWD/llvm-mingw/bin:$PATH"
-          # Use clang++ explicitly to ensure llvm-mingw's clang is the compiler,
-          # not the system gcc that the generic c++ wrapper might resolve to.
           "${{ steps.vars.outputs.mingw_arch }}-w64-mingw32-clang++" \
             -static -o hello.exe hello.cpp
 
@@ -114,85 +106,255 @@ jobs:
           unzip -q powershell.zip -d powershell
           rm powershell.zip
 
-      # ── QEMU + Ubuntu Noble chroot + WINE ──────────────────────────────────
+      # ── QEMU user-mode emulation ────────────────────────────────────────────
 
-      - name: Install QEMU user-mode emulation and debootstrap
+      - name: Install QEMU user-mode emulation
         run: |
           sudo apt-get update -q
-          sudo apt-get install -y qemu-user-static binfmt-support debootstrap
+          sudo apt-get install -y qemu-user-static binfmt-support
           echo "QEMU arm  : $(qemu-arm-static     --version | head -1)"
           echo "QEMU arm64: $(qemu-aarch64-static --version | head -1)"
 
-      - name: Cache Ubuntu Noble chroot with WINE
+      # ── Alpine chroot + Wine ─────────────────────────────────────────────────
+      #
+      # For x86/x64: use Alpine's pre-built wine package from the community
+      # repository.  Alpine builds wine against musl libc so it runs in the
+      # lightweight Alpine chroot without any Ubuntu-specific dependencies.
+      #
+      # For ARM/ARM64: Alpine does not ship a wine package for those arches.
+      # We cross-compile the latest stable Wine from source using a musl.cc
+      # GCC cross-toolchain (arm-linux-musleabihf or aarch64-linux-musl) with
+      # the Alpine ARM rootfs as the target sysroot.  Only the features needed
+      # for running console PE binaries (like PowerShell) are enabled; graphics,
+      # sound, and most optional subsystems are disabled to keep the build fast.
+
+      - name: Get latest Wine stable version
+        id: wine_version
+        run: |
+          # Scrape the WineHQ download index for the latest X.0 stable release.
+          MAJOR=$(curl -fsSL https://dl.winehq.org/wine/source/ \
+            | grep -oP '(?<=href=")\d+\.\d+(?=/")' \
+            | awk -F. '$2 == "0"' \
+            | sort -V | tail -1)
+          VER=$(curl -fsSL "https://dl.winehq.org/wine/source/${MAJOR}/" \
+            | grep -oP "wine-\K[0-9]+\.[0-9]+(?=\.tar\.xz)" \
+            | sort -V | tail -1)
+          echo "version=${VER}" >> "$GITHUB_OUTPUT"
+          echo "major=${MAJOR}"  >> "$GITHUB_OUTPUT"
+
+      - name: Cache Alpine chroot with Wine
         id: cache_chroot
         uses: actions/cache@v5
         with:
           path: chroot.tar.zst
-          key: chroot-noble-${{ steps.vars.outputs.debian_arch }}-wine
+          key: alpine-${{ steps.vars.outputs.alpine_arch }}-wine-${{ steps.wine_version.outputs.version }}-v1
 
-      - name: Create Ubuntu Noble chroot and install WINE
-        if: steps.cache_chroot.outputs.cache-hit != 'true'
+      # ── x86/x64: build chroot with apk wine ────────────────────────────────
+
+      - name: Create Alpine chroot (x86/x64)
+        if: steps.cache_chroot.outputs.cache-hit != 'true' && steps.vars.outputs.wine_cross == 'false'
         run: |
-          DEBIAN_ARCH="${{ steps.vars.outputs.debian_arch }}"
-          UBUNTU_MIRROR="${{ steps.vars.outputs.ubuntu_mirror }}"
+          set -e
+          ALPINE_ARCH="${{ steps.vars.outputs.alpine_arch }}"
+          ALPINE_MIRROR="https://dl-cdn.alpinelinux.org/alpine/latest-stable"
 
-          # Bootstrap an Ubuntu Noble (24.04 LTS) root filesystem for the target
-          # arch.  Noble ships Wine 9.0 in the universe component, which resolves:
-          #   - x64/ARM64: Wine 8.x named-pipe hang under .NET 8 diagnostics
-          #   - ARM32: Wine 8.x Thumb-2 PE-loader code that triggers the QEMU TCG
-          #            assertion thumb_tr_translate_insn (dc->base.pc_next & 1) == 0
-          # Using the same Ubuntu Noble base for every architecture ensures
-          # consistent behaviour across x86, x64, ARM, and ARM64.
-          # qemu-debootstrap handles the QEMU-assisted second stage automatically
-          # for foreign architectures; for native arches it behaves like plain
-          # debootstrap.
-          # DEBIAN_FRONTEND=noninteractive prevents packages such as
-          # console-setup-linux and keyboard-configuration from opening an
-          # interactive debconf prompt during the second-stage configuration,
-          # which would block indefinitely in a non-TTY CI environment.
-          sudo env DEBIAN_FRONTEND=noninteractive qemu-debootstrap \
-            --arch="$DEBIAN_ARCH" \
-            --components=main,universe \
-            noble rootfs \
-            "$UBUNTU_MIRROR"
+          # Download the latest Alpine mini rootfs for this architecture.
+          FILE=$(curl -fsSL "${ALPINE_MIRROR}/releases/${ALPINE_ARCH}/latest-releases.yaml" \
+            | awk '/flavor: alpine-minirootfs/{found=1} found && /file:/{print $2; found=0}' \
+            | head -1)
+          curl -fL "${ALPINE_MIRROR}/releases/${ALPINE_ARCH}/${FILE}" \
+            -o alpine-rootfs.tar.gz
+          sudo mkdir -p rootfs
+          sudo tar -xzf alpine-rootfs.tar.gz -C rootfs
+          rm alpine-rootfs.tar.gz
 
-          # After qemu-debootstrap, binfmt_misc is registered on the host for
-          # every foreign architecture.  Chroot commands can be invoked directly
-          # without specifying the QEMU interpreter explicitly — the kernel
-          # dispatches foreign ELF binaries through binfmt_misc automatically.
-          sudo chroot rootfs apt-get update -q
+          # Set up name resolution and Alpine repositories (main + community).
+          # wine is in the community repository.
+          echo "nameserver 8.8.8.8" | sudo tee rootfs/etc/resolv.conf > /dev/null
+          printf '%s/main\n%s/community\n' \
+            "$ALPINE_MIRROR" "$ALPINE_MIRROR" \
+            | sudo tee rootfs/etc/apk/repositories > /dev/null
 
-          # Detect the latest Wine version available in the distro's repository.
-          WINE_VERSION=$(sudo chroot rootfs apt-cache policy wine \
-            | grep Candidate | awk '{print $2}')
-          echo "Latest available Wine version for ${DEBIAN_ARCH}: ${WINE_VERSION}"
+          # Bind-mount /proc and /dev so apk post-install scripts work.
+          sudo mount --bind /proc rootfs/proc
+          sudo mount --bind /dev  rootfs/dev
+          trap 'sudo umount rootfs/dev  2>/dev/null || true
+                sudo umount rootfs/proc 2>/dev/null || true' EXIT
 
-          # Install Wine.
-          sudo chroot rootfs env DEBIAN_FRONTEND=noninteractive apt-get install -y wine
+          sudo chroot rootfs apk update
+          sudo chroot rootfs apk add --no-cache wine
 
-          # Pack the chroot for caching (zstd for a good speed/size trade-off).
           sudo tar --zstd -cf chroot.tar.zst rootfs
 
-      - name: Restore Ubuntu Noble chroot from cache
-        if: steps.cache_chroot.outputs.cache-hit == 'true'
+      # ── ARM/ARM64: cross-compile Wine from source ───────────────────────────
+
+      - name: Create Alpine chroot with cross-compiled Wine (ARM/ARM64)
+        if: steps.cache_chroot.outputs.cache-hit != 'true' && steps.vars.outputs.wine_cross == 'true'
         run: |
-          sudo tar --zstd -xf chroot.tar.zst
-          # Refresh the QEMU static binary so the chroot always uses the version
-          # installed on the host, even when the tarball was built with an older one.
-          for qemu_bin in /usr/bin/qemu-arm-static /usr/bin/qemu-aarch64-static; do
-            base=$(basename "$qemu_bin")
-            if [ -f "$qemu_bin" ] && [ -f "rootfs/usr/bin/$base" ]; then
-              sudo cp "$qemu_bin" "rootfs/usr/bin/$base"
-            fi
-          done
+          set -e
+          ALPINE_ARCH="${{ steps.vars.outputs.alpine_arch }}"
+          ALPINE_MIRROR="https://dl-cdn.alpinelinux.org/alpine/latest-stable"
+          MUSL_TARGET="${{ steps.vars.outputs.musl_target }}"
+          WINE_VERSION="${{ steps.wine_version.outputs.version }}"
+          WINE_MAJOR="${{ steps.wine_version.outputs.major }}"
+          SYSROOT="$PWD/rootfs"
+
+          # ── 1. Alpine ARM mini rootfs ──────────────────────────────────────
+          FILE=$(curl -fsSL "${ALPINE_MIRROR}/releases/${ALPINE_ARCH}/latest-releases.yaml" \
+            | awk '/flavor: alpine-minirootfs/{found=1} found && /file:/{print $2; found=0}' \
+            | head -1)
+          curl -fL "${ALPINE_MIRROR}/releases/${ALPINE_ARCH}/${FILE}" \
+            -o alpine-rootfs.tar.gz
+          sudo mkdir -p "$SYSROOT"
+          sudo tar -xzf alpine-rootfs.tar.gz -C "$SYSROOT"
+          rm alpine-rootfs.tar.gz
+
+          echo "nameserver 8.8.8.8" | sudo tee "$SYSROOT/etc/resolv.conf" > /dev/null
+          printf '%s/main\n%s/community\n' \
+            "$ALPINE_MIRROR" "$ALPINE_MIRROR" \
+            | sudo tee "$SYSROOT/etc/apk/repositories" > /dev/null
+
+          # ── 2. Install Wine build dependencies into the sysroot ────────────
+          # Use the QEMU-emulated ARM chroot to run apk and install target-arch
+          # development libraries into the rootfs.  These serve as the sysroot
+          # when cross-compiling Wine on the x86_64 host.
+          sudo mount --bind /proc "$SYSROOT/proc"
+          sudo mount --bind /dev  "$SYSROOT/dev"
+          sudo chroot "$SYSROOT" apk update
+          sudo chroot "$SYSROOT" apk add --no-cache \
+            freetype-dev \
+            zlib-dev \
+            libgcc
+          sudo umount "$SYSROOT/dev"
+          sudo umount "$SYSROOT/proc"
+
+          # ── 3. musl.cc GCC cross-toolchain ────────────────────────────────
+          # musl.cc provides pre-built GCC cross-compilers targeting musl libc.
+          # They are self-contained and do not require a separate sysroot for
+          # the C runtime itself; we supply the Alpine rootfs only for the
+          # additional libraries (freetype, zlib) that Wine depends on.
+          curl -fL "https://musl.cc/${MUSL_TARGET}-cross.tgz" \
+            -o musl-cross.tgz
+          tar -xzf musl-cross.tgz
+          rm musl-cross.tgz
+          export PATH="$PWD/${MUSL_TARGET}-cross/bin:$PATH"
+
+          # ── 4. Host build dependencies (flex, bison) ───────────────────────
+          # Wine's build system uses flex (for widl's lexer) and bison (for
+          # widl/wrc parsers).  These must be available on the build host.
+          sudo apt-get install -y flex bison
+
+          # ── 5. Wine source ─────────────────────────────────────────────────
+          curl -fL \
+            "https://dl.winehq.org/wine/source/${WINE_MAJOR}/wine-${WINE_VERSION}.tar.xz" \
+            -o wine.tar.xz
+          tar -xf wine.tar.xz
+          rm wine.tar.xz
+          WINE_SRC="$PWD/wine-${WINE_VERSION}"
+
+          # ── 6. Build Wine host tools ───────────────────────────────────────
+          # Wine's cross-compilation requires host (x86_64) binaries for
+          # winebuild, widl, wmc, and wrc.  Build them with the host GCC using
+          # the same disable flags as the cross-compiled build so that the tool
+          # set is consistent.  --enable-win64 is needed when the target is a
+          # 64-bit architecture (aarch64) so the host tools produce 64-bit PE
+          # stubs; for ARM32 (arm-linux-musleabihf) it is omitted.
+          HOST_EXTRA=""
+          if [ "${{ steps.vars.outputs.wine_arch }}" = "win64" ]; then
+            HOST_EXTRA="--enable-win64"
+          fi
+          mkdir wine-tools-build && cd wine-tools-build
+          "$WINE_SRC/configure" \
+            $HOST_EXTRA \
+            --without-x \
+            --without-opengl \
+            --without-vulkan \
+            --without-alsa \
+            --without-pulse \
+            --without-dbus \
+            --without-gstreamer \
+            --without-freetype \
+            --without-cups \
+            --without-v4l2 \
+            --without-sane \
+            --without-opencl \
+            --without-pcap \
+            --without-netapi \
+            --without-ldap \
+            --without-unwind \
+            --without-usb \
+            --without-capi \
+            --without-osmesa \
+            --without-png \
+            --without-krb5 \
+            --without-sdl2 \
+            --without-udev \
+            --without-pcsclite \
+            --without-wayland \
+            --disable-tests \
+            --disable-nls
+          make -j"$(nproc)" tools
+          cd ..
+
+          # ── 7. Cross-compile Wine for ${MUSL_TARGET} ──────────────────────
+          # Point pkg-config at the Alpine sysroot so Wine's configure finds
+          # freetype and zlib headers/libraries for the target architecture.
+          # PKG_CONFIG_SYSROOT_DIR causes pkg-config to prepend the sysroot
+          # path to all returned -I and -L flags.
+          mkdir wine-cross-build && cd wine-cross-build
+          CC="${MUSL_TARGET}-gcc" \
+          CXX="${MUSL_TARGET}-g++" \
+          CFLAGS="-O2 -I${SYSROOT}/usr/include" \
+          CXXFLAGS="-O2 -I${SYSROOT}/usr/include" \
+          LDFLAGS="-L${SYSROOT}/usr/lib -Wl,-rpath-link,${SYSROOT}/usr/lib -Wl,-rpath-link,${SYSROOT}/lib" \
+          PKG_CONFIG_LIBDIR="${SYSROOT}/usr/lib/pkgconfig:${SYSROOT}/usr/share/pkgconfig" \
+          PKG_CONFIG_SYSROOT_DIR="${SYSROOT}" \
+          "$WINE_SRC/configure" \
+            --host="${MUSL_TARGET}" \
+            --build=x86_64-linux-gnu \
+            --with-wine-tools=../wine-tools-build \
+            --prefix=/usr \
+            --without-x \
+            --without-opengl \
+            --without-vulkan \
+            --without-alsa \
+            --without-pulse \
+            --without-dbus \
+            --without-gstreamer \
+            --without-v4l2 \
+            --without-sane \
+            --without-cups \
+            --without-opencl \
+            --without-pcap \
+            --without-netapi \
+            --without-ldap \
+            --without-unwind \
+            --without-usb \
+            --without-capi \
+            --without-osmesa \
+            --without-png \
+            --without-krb5 \
+            --without-sdl2 \
+            --without-udev \
+            --without-pcsclite \
+            --without-wayland \
+            --disable-tests \
+            --disable-nls
+          make -j"$(nproc)"
+          sudo make DESTDIR="${SYSROOT}" install
+          cd ..
+
+          # ── 8. Pack the chroot ─────────────────────────────────────────────
+          sudo tar --zstd -cf chroot.tar.zst rootfs
+
+      - name: Restore Alpine chroot from cache
+        if: steps.cache_chroot.outputs.cache-hit == 'true'
+        run: sudo tar --zstd -xf chroot.tar.zst
 
       # ── Run under emulation ─────────────────────────────────────────────────
 
       - name: Run hello.exe on WINE (${{ inputs.arch }})
         run: |
-          # Bind-mount /proc, /dev, and the workspace into the chroot so that
-          # Wine's wineserver can access kernel interfaces and hello.exe is
-          # accessible at /mnt/work/hello.exe inside the chroot.
           sudo mkdir -p rootfs/mnt/work
           sudo mount --bind /proc  rootfs/proc
           sudo mount --bind /dev   rootfs/dev
@@ -201,49 +363,38 @@ jobs:
                 sudo umount rootfs/dev        2>/dev/null || true
                 sudo umount rootfs/proc       2>/dev/null || true' EXIT
 
-          # Step 1: Warm-up run to initialize the Wine prefix.
-          # On the very first run Wine runs wineboot.exe internally to set up the
-          # Windows registry and virtual filesystem.  After initialization,
-          # wineboot exits with code 53 ("configuration updated / reboot
-          # required") and Wine exits without running the requested program.
-          # We tolerate any exit code here; the purpose is only to populate the
-          # prefix so the real run below can skip initialization entirely.
-          # WINEDLLPATH must be set inside the chroot environment (after chroot)
-          # so that it refers to paths within the chroot, not the host.
-          #
-          # Use timeout inside the chroot to bound execution time.  Under QEMU
-          # user-mode emulation (arm, arm64) Wine can hang indefinitely if the
-          # emulator does not handle a syscall correctly.
-          # Redirect output to /dev/null rather than piping through head(1):
-          # piping leaves the pipe write-end open via the wineserver daemon,
-          # causing head(1) to block forever waiting for a pipe EOF that never
-          # arrives.
-          sudo chroot rootfs \
-            env HOME=/tmp WINEDEBUG=-all \
-                WINEDLLPATH=/usr/lib/${{ steps.vars.outputs.debian_multiarch }}/wine \
-                WINEARCH=${{ steps.vars.outputs.wine_arch }} \
-            timeout 300 wine /mnt/work/hello.exe > /dev/null 2>&1 || true
+          WINE_ARCH="${{ steps.vars.outputs.wine_arch }}"
+          # Prefer wine64 for 64-bit Windows targets; fall back to wine if
+          # wine64 is not available (some Alpine builds only ship 'wine').
+          if [ "$WINE_ARCH" = "win64" ]; then
+            WINE_BIN=$(sudo chroot rootfs sh -c \
+              'command -v wine64 2>/dev/null || command -v wine')
+          else
+            WINE_BIN=$(sudo chroot rootfs sh -c 'command -v wine')
+          fi
+          echo "Using wine binary: $WINE_BIN"
 
-          # Shut down the warm-up wineserver before starting a fresh session.
-          # Give it up to 60 s to exit on its own; if it doesn't, force-kill it
-          # so the real run below starts with a clean server state.
-          sudo chroot rootfs env HOME=/tmp timeout 60 wineserver -w 2>/dev/null || \
+          # Warm-up: initialise the Wine prefix (wineboot sets up the Windows
+          # registry and virtual filesystem on the first run).  Redirect to
+          # /dev/null rather than piping so that wineserver (a daemon fork)
+          # cannot keep a pipe write-end open and block the shell.
+          sudo chroot rootfs \
+            env HOME=/tmp WINEDEBUG=-all WINEARCH="$WINE_ARCH" \
+            timeout 300 "$WINE_BIN" /mnt/work/hello.exe > /dev/null 2>&1 || true
+
+          # Shut down the warm-up wineserver; force-kill it if it does not
+          # exit within 60 s (can happen under QEMU ARM emulation).
+          sudo chroot rootfs env HOME=/tmp \
+            timeout 60 wineserver -w 2>/dev/null || \
             sudo chroot rootfs env HOME=/tmp wineserver -k 2>/dev/null || true
 
-          # Step 2: Run hello.exe for real.
-          # The prefix is now fully initialized so Wine skips wineboot and
-          # executes hello.exe directly.
-          # timeout guards against a hang if, despite the warm-up, Wine's
-          # initialization did not complete (e.g., warm-up was killed by its
-          # own timeout on slow QEMU targets).
+          # Real run — prefix is now fully initialised.
           sudo chroot rootfs \
-            env HOME=/tmp WINEDEBUG=-all \
-                WINEDLLPATH=/usr/lib/${{ steps.vars.outputs.debian_multiarch }}/wine \
-                WINEARCH=${{ steps.vars.outputs.wine_arch }} \
-            timeout 120 wine /mnt/work/hello.exe
+            env HOME=/tmp WINEDEBUG=-all WINEARCH="$WINE_ARCH" \
+            timeout 120 "$WINE_BIN" /mnt/work/hello.exe
 
-          # Wait for wineserver to shut down cleanly.
-          sudo chroot rootfs env HOME=/tmp timeout 60 wineserver -w 2>/dev/null || \
+          sudo chroot rootfs env HOME=/tmp \
+            timeout 60 wineserver -w 2>/dev/null || \
             sudo chroot rootfs env HOME=/tmp wineserver -k 2>/dev/null || true
 
       - name: Run test.ps1 with PowerShell on WINE (${{ inputs.arch }})
@@ -256,24 +407,27 @@ jobs:
                 sudo umount rootfs/dev        2>/dev/null || true
                 sudo umount rootfs/proc       2>/dev/null || true' EXIT
 
-          # The Wine prefix is already fully initialised by the hello.exe step
-          # above, so no warm-up is needed here.
-          #
-          # DOTNET_EnableDiagnostics=0 prevents the .NET 8 runtime from opening a
-          # diagnostics IPC socket on startup; without it Wine hangs indefinitely
-          # waiting for that socket under 64-bit Wine.
-          # DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1 skips ICU loading, which can
-          # also stall startup in Wine environments that lack the library.
+          WINE_ARCH="${{ steps.vars.outputs.wine_arch }}"
+          if [ "$WINE_ARCH" = "win64" ]; then
+            WINE_BIN=$(sudo chroot rootfs sh -c \
+              'command -v wine64 2>/dev/null || command -v wine')
+          else
+            WINE_BIN=$(sudo chroot rootfs sh -c 'command -v wine')
+          fi
+
+          # DOTNET_EnableDiagnostics=0 prevents .NET 8 from opening a
+          # diagnostics IPC socket that can stall under Wine.
+          # DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1 skips ICU loading.
           sudo chroot rootfs \
-            env HOME=/tmp WINEDEBUG=-all \
-                WINEDLLPATH=/usr/lib/${{ steps.vars.outputs.debian_multiarch }}/wine \
-                WINEARCH=${{ steps.vars.outputs.wine_arch }} \
+            env HOME=/tmp WINEDEBUG=-all WINEARCH="$WINE_ARCH" \
                 DOTNET_EnableDiagnostics=0 \
                 DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1 \
-            wine /mnt/work/powershell/pwsh.exe -NonInteractive -File /mnt/work/test.ps1
+            timeout 300 "$WINE_BIN" \
+              /mnt/work/powershell/pwsh.exe \
+              -NonInteractive -File /mnt/work/test.ps1
 
-          # Wait for wineserver to shut down cleanly.
-          sudo chroot rootfs env HOME=/tmp timeout 60 wineserver -w 2>/dev/null || \
+          sudo chroot rootfs env HOME=/tmp \
+            timeout 60 wineserver -w 2>/dev/null || \
             sudo chroot rootfs env HOME=/tmp wineserver -k 2>/dev/null || true
 
       # ── Artifact upload ─────────────────────────────────────────────────────
