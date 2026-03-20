@@ -116,71 +116,10 @@ jobs:
 
       # ── QEMU + Ubuntu Noble chroot + WINE ──────────────────────────────────
 
-      - name: Get latest stable QEMU release version
-        id: qemu_version
-        run: |
-          VER=$(curl -fsSL https://download.qemu.org/ \
-            | grep -oP 'qemu-\K[0-9]+\.[0-9]+\.[0-9]+(?=\.tar\.xz)' \
-            | sort -V | tail -1)
-          echo "version=$VER" >> "$GITHUB_OUTPUT"
-
-      - name: Cache QEMU user-mode static binaries
-        id: cache_qemu
-        uses: actions/cache@v5
-        with:
-          path: _qemu
-          key: qemu-user-static-${{ steps.qemu_version.outputs.version }}
-
-      - name: Build QEMU user-mode static binaries from source
-        if: steps.cache_qemu.outputs.cache-hit != 'true'
-        run: |
-          QEMU_VERSION="${{ steps.qemu_version.outputs.version }}"
-          echo "Building QEMU ${QEMU_VERSION} (arm-linux-user, aarch64-linux-user, static)"
-
-          # Install build-time dependencies.
-          sudo apt-get update -q
-          sudo apt-get install -y build-essential ninja-build pkg-config \
-            libglib2.0-dev libffi-dev zlib1g-dev
-
-          # Download and extract the source tarball.
-          curl -fL "https://download.qemu.org/qemu-${QEMU_VERSION}.tar.xz" \
-            -o /tmp/qemu.tar.xz
-          tar -xf /tmp/qemu.tar.xz -C /tmp
-          rm /tmp/qemu.tar.xz
-
-          # Configure for ARM user-mode targets only.  --static produces a
-          # fully self-contained binary that can serve as a binfmt_misc
-          # interpreter inside any chroot without additional libraries present.
-          cd "/tmp/qemu-${QEMU_VERSION}"
-          ./configure \
-            --target-list=arm-linux-user,aarch64-linux-user \
-            --static \
-            --disable-docs
-          make -j"$(nproc)"
-
-          # Copy the outputs to the workspace so they are captured by the
-          # cache step above and survive across steps.
-          mkdir -p "$GITHUB_WORKSPACE/_qemu"
-          cp build/qemu-arm     "$GITHUB_WORKSPACE/_qemu/qemu-arm-static"
-          cp build/qemu-aarch64 "$GITHUB_WORKSPACE/_qemu/qemu-aarch64-static"
-          rm -rf "/tmp/qemu-${QEMU_VERSION}"
-
       - name: Install QEMU user-mode emulation and debootstrap
         run: |
           sudo apt-get update -q
           sudo apt-get install -y qemu-user-static binfmt-support debootstrap
-
-          # Overwrite the package-installed QEMU binaries in-place so the
-          # kernel's binfmt_misc F-flag file descriptor (opened at package
-          # install time) picks up the new binary content via the same inode.
-          # Using "sudo install" (atomic rename) would create a new inode and
-          # leave the F-flag FD pointing at the old binary.  Deregistering and
-          # re-registering binfmt_misc entries also fails: any write to
-          # /proc/sys/fs/binfmt_misc after the initial package setup causes an
-          # ELOOP error in the GitHub Actions runner workspace on the next step.
-          # Overwriting the existing inode's content avoids both problems.
-          sudo sh -c 'cat _qemu/qemu-arm-static     > /usr/bin/qemu-arm-static'
-          sudo sh -c 'cat _qemu/qemu-aarch64-static > /usr/bin/qemu-aarch64-static'
           echo "QEMU arm  : $(qemu-arm-static     --version | head -1)"
           echo "QEMU arm64: $(qemu-aarch64-static --version | head -1)"
 
