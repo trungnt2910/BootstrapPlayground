@@ -178,10 +178,17 @@ jobs:
           # ── 2. Install Wine build dependencies into the sysroot ────────────
           # Run apk inside the chroot (via QEMU for ARM, native for x86/x64).
           # Do NOT pass --no-scripts: gcc's post-install script creates
-          # /usr/lib/libgcc_s.so which lld needs to resolve -lgcc_s at link
-          # time (without it every configure link test fails).  Alpine's musl-
-          # based packages do not touch /proc in their install scripts, so no
-          # bind-mount is needed.
+          # /usr/lib/libgcc_s.so (the linker stub needed to resolve -lgcc_s).
+          # Without it every configure AC_LINK_IFELSE test that adds -lgcc_s
+          # fails, including the mandatory 64-bit compare-and-swap check.
+          # Alpine's musl-based packages do not touch /proc in their install
+          # scripts, so no bind-mount is needed.
+          #   musl-dev  — CRT startup objects (crt1.o, crti.o, crtn.o) + headers
+          #   libgcc    — libgcc_s.so.1 runtime shared library
+          #   gcc       — creates the /usr/lib/libgcc_s.so linker stub
+          #   zlib-dev  — kept for Wine's inflate/deflate paths; freetype is
+          #               fully disabled (--without-freetype) so freetype-dev
+          #               is intentionally omitted to keep the sysroot minimal
           sudo chroot "$SYSROOT" apk update
           sudo chroot "$SYSROOT" apk add --no-cache \
             musl-dev \
