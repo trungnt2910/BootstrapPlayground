@@ -146,7 +146,11 @@ jobs:
           # qemu-debootstrap handles the QEMU-assisted second stage automatically
           # for foreign architectures; for native arches it behaves like plain
           # debootstrap.
-          sudo qemu-debootstrap \
+          # DEBIAN_FRONTEND=noninteractive prevents packages such as
+          # console-setup-linux and keyboard-configuration from opening an
+          # interactive debconf prompt during the second-stage configuration,
+          # which would block indefinitely in a non-TTY CI environment.
+          sudo env DEBIAN_FRONTEND=noninteractive qemu-debootstrap \
             --arch="$DEBIAN_ARCH" \
             --components=main,universe \
             noble rootfs \
@@ -164,7 +168,7 @@ jobs:
           echo "Latest available Wine version for ${DEBIAN_ARCH}: ${WINE_VERSION}"
 
           # Install Wine.
-          sudo chroot rootfs apt-get install -y wine
+          sudo chroot rootfs env DEBIAN_FRONTEND=noninteractive apt-get install -y wine
 
           # Pack the chroot for caching (zstd for a good speed/size trade-off).
           sudo tar --zstd -cf chroot.tar.zst rootfs
@@ -206,23 +210,41 @@ jobs:
           # prefix so the real run below can skip initialization entirely.
           # WINEDLLPATH must be set inside the chroot environment (after chroot)
           # so that it refers to paths within the chroot, not the host.
+          #
+          # Use timeout inside the chroot to bound execution time.  Under QEMU
+          # user-mode emulation (arm, arm64) Wine can hang indefinitely if the
+          # emulator does not handle a syscall correctly.
+          # Redirect output to /dev/null rather than piping through head(1):
+          # piping leaves the pipe write-end open via the wineserver daemon,
+          # causing head(1) to block forever waiting for a pipe EOF that never
+          # arrives.
           sudo chroot rootfs \
             env HOME=/tmp WINEDEBUG=-all \
                 WINEDLLPATH=/usr/lib/${{ steps.vars.outputs.debian_multiarch }}/wine \
                 WINEARCH=${{ steps.vars.outputs.wine_arch }} \
-            wine /mnt/work/hello.exe 2>&1 | head -20 || true
+            timeout 300 wine /mnt/work/hello.exe > /dev/null 2>&1 || true
 
-          # Wait for wineserver to shut down cleanly before starting a new session.
-          sudo chroot rootfs env HOME=/tmp wineserver -w
+          # Shut down the warm-up wineserver before starting a fresh session.
+          # Give it up to 60 s to exit on its own; if it doesn't, force-kill it
+          # so the real run below starts with a clean server state.
+          sudo chroot rootfs env HOME=/tmp timeout 60 wineserver -w 2>/dev/null || \
+            sudo chroot rootfs env HOME=/tmp wineserver -k 2>/dev/null || true
 
           # Step 2: Run hello.exe for real.
           # The prefix is now fully initialized so Wine skips wineboot and
           # executes hello.exe directly.
+          # timeout guards against a hang if, despite the warm-up, Wine's
+          # initialization did not complete (e.g., warm-up was killed by its
+          # own timeout on slow QEMU targets).
           sudo chroot rootfs \
             env HOME=/tmp WINEDEBUG=-all \
                 WINEDLLPATH=/usr/lib/${{ steps.vars.outputs.debian_multiarch }}/wine \
                 WINEARCH=${{ steps.vars.outputs.wine_arch }} \
-            wine /mnt/work/hello.exe
+            timeout 120 wine /mnt/work/hello.exe
+
+          # Wait for wineserver to shut down cleanly.
+          sudo chroot rootfs env HOME=/tmp timeout 60 wineserver -w 2>/dev/null || \
+            sudo chroot rootfs env HOME=/tmp wineserver -k 2>/dev/null || true
 
       - name: Run test.ps1 with PowerShell on WINE (${{ inputs.arch }})
         run: |
@@ -251,7 +273,8 @@ jobs:
             wine /mnt/work/powershell/pwsh.exe -NonInteractive -File /mnt/work/test.ps1
 
           # Wait for wineserver to shut down cleanly.
-          sudo chroot rootfs env HOME=/tmp wineserver -w
+          sudo chroot rootfs env HOME=/tmp timeout 60 wineserver -w 2>/dev/null || \
+            sudo chroot rootfs env HOME=/tmp wineserver -k 2>/dev/null || true
 
       # ── Artifact upload ─────────────────────────────────────────────────────
 
