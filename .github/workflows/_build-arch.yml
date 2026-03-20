@@ -147,7 +147,7 @@ jobs:
         uses: actions/cache@v5
         with:
           path: chroot.tar.zst
-          key: alpine-${{ steps.vars.outputs.alpine_arch }}-wine-${{ steps.wine_version.outputs.version }}-v7
+          key: alpine-${{ steps.vars.outputs.alpine_arch }}-wine-${{ steps.wine_version.outputs.version }}-v8
 
       - name: Create Alpine chroot with cross-compiled Wine
         if: steps.cache_chroot.outputs.cache-hit != 'true'
@@ -318,7 +318,10 @@ jobs:
               tools/winebuild/winebuild \
               tools/widl/widl \
               tools/wmc/wmc \
-              tools/wrc/wrc; do
+              tools/wrc/wrc \
+              tools/winegcc/winegcc \
+              tools/winedump/winedump \
+              tools/sfnt2fon/sfnt2fon; do
             make -j"$(nproc)" "${tool}" 2>/dev/null || true
           done
           # The cross-build Makefile depends on tools/wine/wine from the host
