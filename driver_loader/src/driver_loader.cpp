@@ -133,28 +133,32 @@ void DriverLoader::load() {
     if (!ifs)
         throw std::runtime_error("Cannot open driver file: " + m_path);
 
-    std::vector<std::byte> file_data(
+    // Read into a char buffer; reinterpret as bytes where needed.
+    std::vector<char> file_chars(
         (std::istreambuf_iterator<char>(ifs)),
         std::istreambuf_iterator<char>());
-    if (file_data.empty())
+    if (file_chars.empty())
         throw std::runtime_error("Driver file is empty: " + m_path);
 
+    const auto* file_data = reinterpret_cast<const std::byte*>(file_chars.data());
+    const std::size_t file_size = file_chars.size();
+
     // ---- Validate headers -----------------------------------------------
-    if (file_data.size() < sizeof(IMAGE_DOS_HEADER))
+    if (file_size < sizeof(IMAGE_DOS_HEADER))
         throw std::runtime_error("File too small for DOS header");
 
     const auto* dos =
-        reinterpret_cast<const IMAGE_DOS_HEADER*>(file_data.data());
+        reinterpret_cast<const IMAGE_DOS_HEADER*>(file_data);
     if (dos->e_magic != IMAGE_DOS_SIGNATURE)  // 'MZ'
         throw std::runtime_error("Not a valid PE file (bad MZ signature)");
 
-    if (file_data.size() < static_cast<std::size_t>(dos->e_lfanew) +
+    if (file_size < static_cast<std::size_t>(dos->e_lfanew) +
                            sizeof(IMAGE_NT_HEADERS))
         throw std::runtime_error("File too small for NT headers");
 
     const auto* nth =
         reinterpret_cast<const IMAGE_NT_HEADERS*>(
-            file_data.data() + dos->e_lfanew);
+            reinterpret_cast<const char*>(file_data) + dos->e_lfanew);
 
     if (nth->Signature != IMAGE_NT_SIGNATURE)  // 'PE\0\0'
         throw std::runtime_error("Not a valid PE file (bad NT signature)");
@@ -175,13 +179,13 @@ void DriverLoader::load() {
         throw std::runtime_error("PE machine type does not match host architecture");
 
     // ---- Map sections ---------------------------------------------------
-    map_sections(file_data.data(), file_data.size());
+    map_sections(file_data, file_size);
 
     // ---- Relocate -------------------------------------------------------
     apply_relocations();
 
     // ---- Resolve imports ------------------------------------------------
-    resolve_imports(file_data.data());
+    resolve_imports(file_data);
 
     // ---- Set per-section memory protections ----------------------------
     const auto* nth_mapped =
