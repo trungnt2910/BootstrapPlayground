@@ -27,28 +27,28 @@ jobs:
               echo "debian_arch=i386"                      >> "$GITHUB_OUTPUT"
               echo "debian_multiarch=i386-linux-gnu"       >> "$GITHUB_OUTPUT"
               echo "wine_arch=win32"                       >> "$GITHUB_OUTPUT"
-              echo "ps_arch=x86"                           >> "$GITHUB_OUTPUT"
+              echo "pwsh_arch=x86"                         >> "$GITHUB_OUTPUT"
               ;;
             x64)
               echo "mingw_arch=x86_64"                     >> "$GITHUB_OUTPUT"
               echo "debian_arch=amd64"                     >> "$GITHUB_OUTPUT"
               echo "debian_multiarch=x86_64-linux-gnu"     >> "$GITHUB_OUTPUT"
               echo "wine_arch=win64"                       >> "$GITHUB_OUTPUT"
-              echo "ps_arch=x64"                           >> "$GITHUB_OUTPUT"
+              echo "pwsh_arch=x64"                         >> "$GITHUB_OUTPUT"
               ;;
             ARM)
               echo "mingw_arch=armv7"                      >> "$GITHUB_OUTPUT"
               echo "debian_arch=armhf"                     >> "$GITHUB_OUTPUT"
               echo "debian_multiarch=arm-linux-gnueabihf"  >> "$GITHUB_OUTPUT"
               echo "wine_arch=win32"                       >> "$GITHUB_OUTPUT"
-              echo "ps_arch=arm32"                         >> "$GITHUB_OUTPUT"
+              echo "pwsh_arch=arm32"                       >> "$GITHUB_OUTPUT"
               ;;
             ARM64)
               echo "mingw_arch=aarch64"                    >> "$GITHUB_OUTPUT"
               echo "debian_arch=arm64"                     >> "$GITHUB_OUTPUT"
               echo "debian_multiarch=aarch64-linux-gnu"    >> "$GITHUB_OUTPUT"
               echo "wine_arch=win64"                       >> "$GITHUB_OUTPUT"
-              echo "ps_arch=arm64"                         >> "$GITHUB_OUTPUT"
+              echo "pwsh_arch=arm64"                       >> "$GITHUB_OUTPUT"
               ;;
           esac
 
@@ -103,7 +103,7 @@ jobs:
       - name: Download PowerShell for ${{ inputs.arch }}
         run: |
           PS_VERSION="7.4.0-preview.4"
-          PS_ARCH="${{ steps.vars.outputs.ps_arch }}"
+          PS_ARCH="${{ steps.vars.outputs.pwsh_arch }}"
           curl -fL "https://github.com/PowerShell/PowerShell/releases/download/v${PS_VERSION}/PowerShell-${PS_VERSION}-win-${PS_ARCH}.zip" \
             -o powershell.zip
           mkdir -p powershell
@@ -116,6 +116,12 @@ jobs:
         run: |
           sudo apt-get update -q
           sudo apt-get install -y qemu-user-static binfmt-support debootstrap
+          # Attempt to upgrade to a newer QEMU from the ubuntu-virt PPA to pick up
+          # ARM Thumb TCG fixes that are not yet in the default Ubuntu package.
+          sudo apt-get install -y software-properties-common 2>/dev/null || true
+          sudo add-apt-repository -y ppa:ubuntu-virt/ppa 2>/dev/null || true
+          sudo apt-get update -q 2>/dev/null || true
+          sudo apt-get install -y --only-upgrade qemu-user-static 2>/dev/null || true
 
       - name: Cache Debian bookworm chroot with WINE
         id: cache_chroot
@@ -159,6 +165,14 @@ jobs:
         if: steps.cache_chroot.outputs.cache-hit == 'true'
         run: |
           sudo tar --zstd -xf chroot.tar.zst
+          # Refresh the QEMU static binary so the chroot always uses the version
+          # installed on the host, even when the tarball was built with an older one.
+          for qemu_bin in /usr/bin/qemu-arm-static /usr/bin/qemu-aarch64-static; do
+            base=$(basename "$qemu_bin")
+            if [ -f "$qemu_bin" ] && [ -f "rootfs/usr/bin/$base" ]; then
+              sudo cp "$qemu_bin" "rootfs/usr/bin/$base"
+            fi
+          done
 
       # ── Run under emulation ─────────────────────────────────────────────────
 
@@ -212,24 +226,24 @@ jobs:
                 sudo umount rootfs/dev        2>/dev/null || true
                 sudo umount rootfs/proc       2>/dev/null || true' EXIT
 
-          # Warm-up run to let PowerShell and Wine perform any first-run
-          # initialization (registry entries, .NET bootstrapping, etc.).
+          # The Wine prefix is already fully initialised by the hello.exe step
+          # above, so no warm-up is needed here.
+          #
+          # DOTNET_EnableDiagnostics=0 prevents the .NET 8 runtime from opening a
+          # diagnostics IPC socket on startup; without it Wine hangs indefinitely
+          # waiting for that socket under 64-bit Wine.
+          # DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1 skips ICU loading, which can
+          # also stall startup in Wine environments that lack the library.
           sudo chroot rootfs \
             env HOME=/tmp WINEDEBUG=-all \
                 WINEDLLPATH=/usr/lib/${{ steps.vars.outputs.debian_multiarch }}/wine \
                 WINEARCH=${{ steps.vars.outputs.wine_arch }} \
-            wine /mnt/work/powershell/pwsh.exe -NonInteractive -File /mnt/work/test.ps1 \
-            2>&1 | head -20 || true
-
-          # Wait for wineserver to shut down cleanly before starting a new session.
-          sudo chroot rootfs env HOME=/tmp wineserver -w
-
-          # Real run: execute test.ps1 via PowerShell.
-          sudo chroot rootfs \
-            env HOME=/tmp WINEDEBUG=-all \
-                WINEDLLPATH=/usr/lib/${{ steps.vars.outputs.debian_multiarch }}/wine \
-                WINEARCH=${{ steps.vars.outputs.wine_arch }} \
+                DOTNET_EnableDiagnostics=0 \
+                DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1 \
             wine /mnt/work/powershell/pwsh.exe -NonInteractive -File /mnt/work/test.ps1
+
+          # Wait for wineserver to shut down cleanly.
+          sudo chroot rootfs env HOME=/tmp wineserver -w
 
       # ── Artifact upload ─────────────────────────────────────────────────────
 
