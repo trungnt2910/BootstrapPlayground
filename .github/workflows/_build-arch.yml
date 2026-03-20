@@ -196,33 +196,43 @@ jobs:
             libgcc \
             gcc
 
+          # Alpine does not always ship /usr/lib/libgcc_s.so (the link-time
+          # stub).  Without it clang adds -lgcc_s to every link and the
+          # linker fails to resolve it, causing all AC_LINK_IFELSE tests
+          # (including the mandatory 64-bit CAS check) to report "unknown".
+          if [ ! -e "${SYSROOT}/usr/lib/libgcc_s.so" ]; then
+            echo 'INPUT(-lgcc_s /usr/lib/libgcc_s.so.1)' \
+              | sudo tee "${SYSROOT}/usr/lib/libgcc_s.so" > /dev/null
+          fi
+
           # ── 3. Set up llvm-mingw's clang as the musl cross-compiler ────────
           export PATH="$PWD/llvm-mingw/bin:$PATH"
           mkdir -p _musl_cross/bin
 
-          # Select the appropriate linker for the target architecture.
-          # x86 / x64: lld from llvm-mingw (x86 ELF targets work fine).
-          # ARM / ARM64: Ubuntu cross-binutils ld; these handle ARM ELF and
-          #   musl's libc.so GROUP linker script more reliably than lld.
+          # Select the linker.
+          # x86 / x64: omit -fuse-ld so clang falls back to the host system ld
+          #   (bfd); it handles x86_64/i686 ELF natively and fully supports
+          #   musl's GROUP linker scripts.  Avoid lld: llvm-mingw's ld.lld is
+          #   not reliably on the search path clang uses for Linux ELF targets.
+          # ARM / ARM64: Ubuntu cross-binutils ld (installed in step 4).
           case "${MUSL_TARGET}" in
             arm-linux-musleabihf)
-              CROSS_LD_BIN="/usr/bin/arm-linux-gnueabihf-ld"
+              FUSE_LD="-fuse-ld=/usr/bin/arm-linux-gnueabihf-ld"
               CROSS_LD_PKG="binutils-arm-linux-gnueabihf" ;;
             aarch64-linux-musl)
-              CROSS_LD_BIN="/usr/bin/aarch64-linux-gnu-ld"
+              FUSE_LD="-fuse-ld=/usr/bin/aarch64-linux-gnu-ld"
               CROSS_LD_PKG="binutils-aarch64-linux-gnu" ;;
             *)
-              # i686-linux-musl or x86_64-linux-musl: use lld from llvm-mingw
-              CROSS_LD_BIN="lld"
+              FUSE_LD=""
               CROSS_LD_PKG="" ;;
           esac
 
           # gcc/g++ wrappers: embed absolute paths so they work from any cwd
-          printf '#!/bin/sh\nexec clang --target=%s --sysroot=%s -fuse-ld=%s "$@"\n' \
-            "${MUSL_TARGET}" "${SYSROOT}" "${CROSS_LD_BIN}" \
+          printf '#!/bin/sh\nexec clang --target=%s --sysroot=%s %s "$@"\n' \
+            "${MUSL_TARGET}" "${SYSROOT}" "${FUSE_LD}" \
             > "_musl_cross/bin/${MUSL_TARGET}-gcc"
-          printf '#!/bin/sh\nexec clang++ --target=%s --sysroot=%s -fuse-ld=%s "$@"\n' \
-            "${MUSL_TARGET}" "${SYSROOT}" "${CROSS_LD_BIN}" \
+          printf '#!/bin/sh\nexec clang++ --target=%s --sysroot=%s %s "$@"\n' \
+            "${MUSL_TARGET}" "${SYSROOT}" "${FUSE_LD}" \
             > "_musl_cross/bin/${MUSL_TARGET}-g++"
           chmod +x "_musl_cross/bin/${MUSL_TARGET}-gcc" \
                    "_musl_cross/bin/${MUSL_TARGET}-g++"
