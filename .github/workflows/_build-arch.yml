@@ -147,7 +147,7 @@ jobs:
         uses: actions/cache@v5
         with:
           path: chroot.tar.zst
-          key: alpine-${{ steps.vars.outputs.alpine_arch }}-wine-${{ steps.wine_version.outputs.version }}-v8
+          key: alpine-${{ steps.vars.outputs.alpine_arch }}-wine-${{ steps.wine_version.outputs.version }}-v9
 
       - name: Create Alpine chroot with cross-compiled Wine
         if: steps.cache_chroot.outputs.cache-hit != 'true'
@@ -183,15 +183,17 @@ jobs:
           # fails, including the mandatory 64-bit compare-and-swap check.
           # Alpine's musl-based packages do not touch /proc in their install
           # scripts, so no bind-mount is needed.
-          #   musl-dev  — CRT startup objects (crt1.o, crti.o, crtn.o) + headers
-          #   libgcc    — libgcc_s.so.1 runtime shared library
-          #   gcc       — creates the /usr/lib/libgcc_s.so linker stub
-          #   zlib-dev  — kept for Wine's inflate/deflate paths; freetype is
-          #               fully disabled (--without-freetype) so freetype-dev
-          #               is intentionally omitted to keep the sysroot minimal
+          #   musl-dev      — CRT startup objects + C headers
+          #   linux-headers — Linux kernel headers (linux/cdrom.h, linux/major.h,
+          #                   etc.) needed by Wine's ntdll/unix/cdrom.c and other
+          #                   files; Alpine's musl-dev does not include these
+          #   libgcc        — libgcc_s.so.1 runtime shared library
+          #   gcc           — creates the /usr/lib/libgcc_s.so linker stub
+          #   zlib-dev      — kept for Wine's inflate/deflate paths
           sudo chroot "$SYSROOT" apk update
           sudo chroot "$SYSROOT" apk add --no-cache \
             musl-dev \
+            linux-headers \
             zlib-dev \
             libgcc \
             gcc
