@@ -216,28 +216,57 @@ jobs:
 
           # ── 2. Install Wine build dependencies into the sysroot ────────────
           # Use the QEMU-emulated ARM chroot to run apk and install target-arch
-          # development libraries into the rootfs.  These serve as the sysroot
-          # when cross-compiling Wine on the x86_64 host.
+          # development libraries into the rootfs.  These serve as both the
+          # cross-compilation sysroot and the runtime environment for Wine.
+          # musl-dev provides CRT startup files (crt1.o etc.) and static musl.
+          # gcc provides the libgcc_s.so linker stub needed to resolve -lgcc_s
+          # at link time.  libgcc provides the libgcc_s.so.1 runtime itself.
           sudo mount --bind /proc "$SYSROOT/proc"
           sudo mount --bind /dev  "$SYSROOT/dev"
           sudo chroot "$SYSROOT" apk update
           sudo chroot "$SYSROOT" apk add --no-cache \
+            musl-dev \
             freetype-dev \
             zlib-dev \
-            libgcc
+            libgcc \
+            gcc
           sudo umount "$SYSROOT/dev"
           sudo umount "$SYSROOT/proc"
 
-          # ── 3. musl.cc GCC cross-toolchain ────────────────────────────────
-          # musl.cc provides pre-built GCC cross-compilers targeting musl libc.
-          # They are self-contained and do not require a separate sysroot for
-          # the C runtime itself; we supply the Alpine rootfs only for the
-          # additional libraries (freetype, zlib) that Wine depends on.
-          curl -fL "https://musl.cc/${MUSL_TARGET}-cross.tgz" \
-            -o musl-cross.tgz
-          tar -xzf musl-cross.tgz
-          rm musl-cross.tgz
-          export PATH="$PWD/${MUSL_TARGET}-cross/bin:$PATH"
+          # ── 3. Set up llvm-mingw's clang as the musl cross-compiler ───────────
+          # llvm-mingw (already downloaded for the MinGW build) ships clang and
+          # lld which support all LLVM targets including arm-linux-musleabihf and
+          # aarch64-linux-musl.  We create thin wrapper scripts named
+          # ${MUSL_TARGET}-gcc / ${MUSL_TARGET}-g++ so that autoconf's --host
+          # prefix search finds the compiler without a traditional GCC package.
+          export PATH="$PWD/llvm-mingw/bin:$PATH"
+          mkdir -p _musl_cross/bin
+
+          # gcc/g++ wrappers: embed absolute paths so they work from any cwd
+          printf '#!/bin/sh\nexec clang --target=%s --sysroot=%s -fuse-ld=lld "$@"\n' \
+            "${MUSL_TARGET}" "${SYSROOT}" > "_musl_cross/bin/${MUSL_TARGET}-gcc"
+          printf '#!/bin/sh\nexec clang++ --target=%s --sysroot=%s -fuse-ld=lld "$@"\n' \
+            "${MUSL_TARGET}" "${SYSROOT}" > "_musl_cross/bin/${MUSL_TARGET}-g++"
+          chmod +x "_musl_cross/bin/${MUSL_TARGET}-gcc" \
+                   "_musl_cross/bin/${MUSL_TARGET}-g++"
+
+          # Archival / inspection tools come from the LLVM suite
+          for TOOL in ar ranlib nm strip objcopy objdump; do
+            ln -sf "$PWD/llvm-mingw/bin/llvm-${TOOL}" \
+              "_musl_cross/bin/${MUSL_TARGET}-${TOOL}"
+          done
+          export PATH="$PWD/_musl_cross/bin:$PATH"
+
+          # Alpine's gcc package installs libgcc under a vendor-specific triplet
+          # (e.g. armv7-alpine-linux-musleabihf).  Create a symlink at the
+          # canonical musl target triplet path so clang's GCC-installation
+          # detection finds libgcc.a when resolving -rtlib=libgcc.
+          GCC_SYSDIR=$(find "${SYSROOT}/usr/lib/gcc" \
+            -maxdepth 1 -mindepth 1 -type d 2>/dev/null | head -1)
+          if [ -n "${GCC_SYSDIR}" ]; then
+            sudo ln -sfn "${GCC_SYSDIR}" \
+              "${SYSROOT}/usr/lib/gcc/${MUSL_TARGET}"
+          fi
 
           # ── 4. Host build dependencies (flex, bison) ───────────────────────
           # Wine's build system uses flex (for widl's lexer) and bison (for
