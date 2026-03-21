@@ -24,6 +24,11 @@ if(NOT MINGW_ARCH)
         "MINGW_ARCH environment variable before running cmake.")
 endif()
 
+# Cache MINGW_ARCH so it is available in try_compile sub-projects, and tell
+# CMake to forward it explicitly (CMAKE_TRY_COMPILE_PLATFORM_VARIABLES).
+set(MINGW_ARCH "${MINGW_ARCH}" CACHE STRING "Target MinGW architecture" FORCE)
+list(APPEND CMAKE_TRY_COMPILE_PLATFORM_VARIABLES MINGW_ARCH)
+
 set(CMAKE_SYSTEM_NAME Windows)
 set(CMAKE_SYSTEM_PROCESSOR "${MINGW_ARCH}")
 
