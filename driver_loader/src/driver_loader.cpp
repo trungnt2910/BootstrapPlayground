@@ -514,9 +514,9 @@ void DriverLoader::resolve_imports(const std::byte* /*file_data*/) {
                 // Import by ordinal.
                 const WORD ordinal =
                     static_cast<WORD>(IMAGE_ORDINAL(name_thunk->u1.Ordinal));
-                const std::string ordinal_name =
-                    std::format("#{}", static_cast<unsigned>(ordinal));
-                func_addr = resolve_import(dll_name, ordinal_name);
+                func_addr = resolve_import(
+                    dll_name,
+                    std::format("#{}", static_cast<unsigned>(ordinal)));
             } else {
                 // Import by name.
                 const auto* ibn =
