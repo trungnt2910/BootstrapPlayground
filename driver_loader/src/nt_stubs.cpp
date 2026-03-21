@@ -205,6 +205,7 @@ static VOID   NTAPI impl_KeInitializeEvent(KEVENT* event, ULONG type,
 static KIRQL  NTAPI  impl_KeGetCurrentIrql(VOID);
 static KIRQL  NTAPI  impl_KeRaiseIrqlToDpcLevel(VOID);
 static KIRQL  FASTCALL impl_KfRaiseIrql(KIRQL newIrql);
+static VOID   NTAPI impl_RtlFailFast(ULONG_PTR code);
 
 // ---- Reference counting ----------------------------------------------------
 static LONG_PTR FASTCALL impl_ObfReferenceObject(PVOID object);
@@ -380,6 +381,7 @@ static const NtSymbol s_nt_symbols[] = {
     NT_SYM(RtlCopyUnicodeString),
     NT_SYM(RtlCompareUnicodeString),
     NT_SYM(RtlFreeUnicodeString),
+    NT_SYM(RtlFailFast),
     NT_SYM(RtlCompareMemory),
     NT_SYM(RtlAssert),
     NT_SYM(RtlGetNtSystemRoot),
@@ -856,11 +858,22 @@ static KIRQL NTAPI impl_KeGetCurrentIrql(VOID) {
 }
 
 static KIRQL NTAPI impl_KeRaiseIrqlToDpcLevel(VOID) {
+    std::fprintf(stderr,
+        "[nt_stubs] call KeRaiseIrqlToDpcLevel -> PASSIVE_LEVEL\n");
+    std::fflush(stderr);
     return static_cast<KIRQL>(PASSIVE_LEVEL);
 }
 
 static KIRQL FASTCALL impl_KfRaiseIrql(KIRQL /*newIrql*/) {
     return static_cast<KIRQL>(PASSIVE_LEVEL);
+}
+
+static VOID NTAPI impl_RtlFailFast(ULONG_PTR code) {
+    std::fprintf(stderr,
+        "[nt_stubs] call RtlFailFast(code=0x%llX)\n",
+        static_cast<unsigned long long>(code));
+    std::fflush(stderr);
+    std::abort();
 }
 
 // ---- Reference counting ----------------------------------------------------
