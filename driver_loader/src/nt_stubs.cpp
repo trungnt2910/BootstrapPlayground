@@ -893,7 +893,18 @@ static PVOID NTAPI impl_MmGetSystemRoutineAddress(UNICODE_STRING* routineName) {
         narrow, static_cast<int>(sizeof(narrow)) - 1, nullptr, nullptr);
     if (len <= 0) return nullptr;
     narrow[len] = '\0';
-    return nt_stubs_lookup(narrow);
+    void* sym = nt_stubs_lookup(narrow);
+    if (sym) {
+        std::fprintf(stderr,
+            "[nt_stubs] MmGetSystemRoutineAddress(%s) -> %p\n",
+            narrow, sym);
+        return sym;
+    }
+    void* stub = nt_stubs_allocate(narrow);
+    std::fprintf(stderr,
+        "[nt_stubs] MmGetSystemRoutineAddress(%s) unresolved; using stub @ %p\n",
+        narrow, stub);
+    return stub;
 }
 
 // ---- MDL operations --------------------------------------------------------

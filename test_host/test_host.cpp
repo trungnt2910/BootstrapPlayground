@@ -76,7 +76,6 @@ extern "C" NTSTATUS NTAPI LxInitialize(PDRIVER_OBJECT /*driverObject*/,
 
 int main(int argc, char* argv[]) {
     SetUnhandledExceptionFilter(&top_level_exception_filter);
-    AddVectoredExceptionHandler(1, &top_level_exception_filter);
 
     // Build the driver path using only C-style string operations so that
     // no heap allocation (std::string) is needed before the try block.
