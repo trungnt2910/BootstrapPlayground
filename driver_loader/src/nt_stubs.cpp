@@ -536,6 +536,21 @@ void* nt_stubs_lookup(const char* name) noexcept {
         };
         for (const char* sn : seh_names) {
             if (std::strcmp(name, sn) == 0) {
+#if defined(_M_IX86) || defined(__i386__)
+                // On 32-bit x86, forwarding kernel unwind helpers to ntdll's
+                // user-mode implementations can terminate the process when
+                // unwind metadata/context differs. Prefer local fallbacks.
+                if (std::strcmp(sn, "__C_specific_handler") != 0) {
+                    std::fprintf(stderr,
+                        "[nt_stubs] lookup %s -> x86 fallback\n", name);
+                    if (std::strcmp(sn, "_local_unwind") == 0)
+                        return reinterpret_cast<void*>(&impl__local_unwind_fallback);
+                    if (std::strcmp(sn, "__jump_unwind") == 0)
+                        return reinterpret_cast<void*>(&impl___jump_unwind_fallback);
+                    if (std::strcmp(sn, "RtlUnwind") == 0)
+                        return reinterpret_cast<void*>(&impl_RtlUnwind_fallback);
+                }
+#endif
                 HMODULE m = GetModuleHandleA("ntdll.dll");
                 if (m) {
                     void* p = reinterpret_cast<void*>(GetProcAddress(m, sn));
