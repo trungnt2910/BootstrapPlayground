@@ -98,9 +98,12 @@ void* nt_stubs_allocate(const char* name) noexcept {
 // the symbol table so the driver's *__imp_Var dereference gives our value.
 // ---------------------------------------------------------------------------
 
-static PVOID        s_PsProcessType          = nullptr;
-static PVOID        s_PsThreadType           = nullptr;
-static PVOID        s_IoDeviceObjectType     = nullptr;
+static ULONG_PTR    s_fake_object_type_proc  = 1;
+static ULONG_PTR    s_fake_object_type_thr   = 1;
+static ULONG_PTR    s_fake_object_type_dev   = 1;
+static PVOID        s_PsProcessType          = &s_fake_object_type_proc;
+static PVOID        s_PsThreadType           = &s_fake_object_type_thr;
+static PVOID        s_IoDeviceObjectType     = &s_fake_object_type_dev;
 static EPROCESS     s_fake_eprocess          = {};
 static PEPROCESS    s_PsInitialSystemProcess = &s_fake_eprocess;
 static SE_EXPORTS   s_se_exports_buf         = {};
