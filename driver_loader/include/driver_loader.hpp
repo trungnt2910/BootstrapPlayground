@@ -7,6 +7,7 @@
 
 #include "wdm.hpp"
 
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <string>
@@ -55,6 +56,14 @@ public:
 
     // Returns true if load() has been called successfully.
     [[nodiscard]] bool is_loaded() const noexcept { return m_base != nullptr; }
+
+    // Load debug symbols for the currently loaded driver image using DbgHelp.
+    // If pdb_path is non-empty, its directory is added to the symbol search
+    // path before loading symbols for this module.
+    //
+    // Requires: is_loaded() == true.
+    // Throws std::runtime_error on failure.
+    void load_pdb(std::string pdb_path);
 
     // -----------------------------------------------------------------------
     // Execution
@@ -145,4 +154,8 @@ private:
     std::wstring m_driver_name_buf;
     // Storage for the registry-path wide string (set at call_driver_entry time).
     std::wstring m_registry_path_buf;
+
+    // Per-instance DbgHelp symbol state (managed by load_pdb/destructor).
+    bool         m_dbghelp_attached   = false;
+    std::uint64_t m_dbghelp_module_base = 0;
 };

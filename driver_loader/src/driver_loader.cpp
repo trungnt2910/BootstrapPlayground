@@ -6,11 +6,13 @@
 #include "nt_stubs_internal.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <cstdio>
 #include <cstring>
 #include <fstream>
 #include <ios>
 #include <iterator>
+#include <mutex>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -24,6 +26,7 @@ void* nt_stubs_lookup(const char* name) noexcept;
 // Windows PE headers (from <windows.h>).
 // ---------------------------------------------------------------------------
 #include <windows.h>
+#include <dbghelp.h>
 
 // ---------------------------------------------------------------------------
 // ARM / ARM64 relocation types that may be absent from older MinGW headers.
@@ -120,6 +123,10 @@ bool iequal(std::string_view a, std::string_view b) noexcept {
     return true;
 }
 
+std::mutex        s_dbghelp_mu;
+std::atomic<int>  s_dbghelp_refcount{0};
+bool              s_dbghelp_initialized = false;
+
 } // anonymous namespace
 
 // ---------------------------------------------------------------------------
@@ -131,6 +138,23 @@ DriverLoader::DriverLoader(std::string path)
 {}
 
 DriverLoader::~DriverLoader() {
+    {
+        std::lock_guard<std::mutex> lock(s_dbghelp_mu);
+        if (m_dbghelp_attached) {
+            const HANDLE proc = GetCurrentProcess();
+            if (m_dbghelp_module_base != 0) {
+                (void)SymUnloadModule64(proc, m_dbghelp_module_base);
+                m_dbghelp_module_base = 0;
+            }
+            const int refs = --s_dbghelp_refcount;
+            m_dbghelp_attached = false;
+            if (refs <= 0 && s_dbghelp_initialized) {
+                (void)SymCleanup(proc);
+                s_dbghelp_initialized = false;
+                s_dbghelp_refcount = 0;
+            }
+        }
+    }
     if (m_base) {
         VirtualFree(m_base, 0, MEM_RELEASE);
         m_base = nullptr;
@@ -230,6 +254,61 @@ void DriverLoader::load() {
 
     // Flush CPU instruction cache so newly-mapped code is visible.
     FlushInstructionCache(GetCurrentProcess(), m_base, m_image_size);
+}
+
+void DriverLoader::load_pdb(std::string pdb_path) {
+    if (!m_base) {
+        throw std::runtime_error("DriverLoader::load_pdb() called before load()");
+    }
+
+    const HANDLE proc = GetCurrentProcess();
+    std::lock_guard<std::mutex> lock(s_dbghelp_mu);
+
+    if (!s_dbghelp_initialized) {
+        SymSetOptions(SYMOPT_DEFERRED_LOADS | SYMOPT_UNDNAME);
+        if (!SymInitialize(proc, nullptr, FALSE)) {
+            throw std::runtime_error("SymInitialize failed");
+        }
+        s_dbghelp_initialized = true;
+    }
+
+    if (!m_dbghelp_attached) {
+        ++s_dbghelp_refcount;
+        m_dbghelp_attached = true;
+    }
+
+    if (!pdb_path.empty()) {
+        // Keep the exact user path; DbgHelp accepts ';'-separated list.
+        if (!SymSetSearchPath(proc, pdb_path.c_str())) {
+            throw std::runtime_error("SymSetSearchPath failed for pdb path: " + pdb_path);
+        }
+    }
+
+    if (m_dbghelp_module_base != 0) {
+        (void)SymUnloadModule64(proc, m_dbghelp_module_base);
+        m_dbghelp_module_base = 0;
+    }
+
+    DWORD64 mod_base = SymLoadModuleEx(
+        proc,
+        nullptr,
+        m_path.c_str(),
+        nullptr,
+        reinterpret_cast<DWORD64>(m_base),
+        static_cast<DWORD>(m_image_size),
+        nullptr,
+        0);
+    if (mod_base == 0) {
+        throw std::runtime_error("SymLoadModuleEx failed for image: " + m_path);
+    }
+    m_dbghelp_module_base = static_cast<std::uint64_t>(mod_base);
+
+    // Touch symbol loading so failures surface immediately.
+    IMAGEHLP_MODULE64 modinfo = {};
+    modinfo.SizeOfStruct = sizeof(modinfo);
+    if (!SymGetModuleInfo64(proc, mod_base, &modinfo)) {
+        throw std::runtime_error("SymGetModuleInfo64 failed after SymLoadModuleEx");
+    }
 }
 
 // ---------------------------------------------------------------------------

@@ -55,5 +55,4 @@ target_include_directories(driver_loader
 # The library needs to link against Windows system libraries for VirtualAlloc,
 # HeapAlloc, WideCharToMultiByte, etc.
 # These are already available via the MinGW sysroot import libraries.
-target_link_libraries(driver_loader PUBLIC kernel32)
-
+target_link_libraries(driver_loader PUBLIC kernel32 dbghelp)
