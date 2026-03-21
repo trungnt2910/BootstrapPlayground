@@ -31,16 +31,30 @@ namespace nt_stubs_internal {
 std::array<const char*, 256> name_table = {};
 int next_index = 0;
 
+[[noreturn]] static void report_and_abort(const char* msg) noexcept {
+    if (!msg) msg = "[nt_stubs] <null message>\n";
+    OutputDebugStringA(msg);
+    HANDLE h = GetStdHandle(STD_ERROR_HANDLE);
+    if (h && h != INVALID_HANDLE_VALUE) {
+        DWORD written = 0;
+        const DWORD len = static_cast<DWORD>(std::strlen(msg));
+        (void)WriteFile(h, msg, len, &written, nullptr);
+    }
+    std::fputs(msg, stderr);
+    std::fflush(stderr);
+    std::abort();
+}
+
 [[noreturn]] void handle_call(int idx) noexcept {
     const char* name =
         (idx >= 0 && idx < 256 && name_table[static_cast<std::size_t>(idx)])
         ? name_table[static_cast<std::size_t>(idx)]
         : "<unknown>";
-    std::fprintf(stderr,
-        "[nt_stubs] Unimplemented ntoskrnl function called: %s (stub #%d)\n",
-        name, idx);
-    std::fflush(stderr);
-    std::abort();
+    char buf[320];
+    std::snprintf(buf, sizeof(buf),
+                  "[nt_stubs] Unimplemented ntoskrnl function called: %s (stub #%d)\n",
+                  name, idx);
+    report_and_abort(buf);
 }
 
 } // namespace nt_stubs_internal
@@ -50,11 +64,9 @@ int next_index = 0;
 // ---------------------------------------------------------------------------
 
 static void* fallback_stub() noexcept {
-    std::fprintf(stderr,
+    nt_stubs_internal::report_and_abort(
         "[nt_stubs] An ntoskrnl stub was called but all 256 stub slots are "
         "exhausted.\n");
-    std::fflush(stderr);
-    std::abort();
 }
 
 // ---------------------------------------------------------------------------
@@ -264,6 +276,12 @@ static NTSTATUS NTAPI impl_ZwCreateFile(HANDLE* fileHandle, ULONG access,
                         ULONG fileAttrs, ULONG shareAccess,
                         ULONG createDisp, ULONG createOpts,
                         PVOID eaBuffer, ULONG eaLength);
+static LONG  NTAPI impl___C_specific_handler_fallback(...);
+static VOID  NTAPI impl__local_unwind_fallback(PVOID frame, PVOID targetIp);
+static VOID  NTAPI impl___jump_unwind_fallback(PVOID frame, PVOID targetIp);
+static VOID  NTAPI impl_RtlUnwind_fallback(PVOID targetFrame, PVOID targetIp,
+                                           PVOID exceptionRecord,
+                                           PVOID returnValue);
 
 // ---- ETW -------------------------------------------------------------------
 static NTSTATUS NTAPI impl_EtwRegister(PVOID providerId, PVOID callback,
@@ -517,6 +535,23 @@ void* nt_stubs_lookup(const char* name) noexcept {
                     void* p = reinterpret_cast<void*>(GetProcAddress(m, sn));
                     if (p) return p;
                 }
+                // Fallback to no-op helpers so DriverEntry can continue on
+                // runtimes where these exports are absent.
+                char msg[256];
+                std::snprintf(msg, sizeof(msg),
+                              "[nt_stubs] Warning: %s not found in ntdll/msvcrt; using fallback implementation.\n",
+                              sn);
+                OutputDebugStringA(msg);
+                std::fputs(msg, stderr);
+                std::fflush(stderr);
+                if (std::strcmp(sn, "__C_specific_handler") == 0)
+                    return reinterpret_cast<void*>(&impl___C_specific_handler_fallback);
+                if (std::strcmp(sn, "_local_unwind") == 0)
+                    return reinterpret_cast<void*>(&impl__local_unwind_fallback);
+                if (std::strcmp(sn, "__jump_unwind") == 0)
+                    return reinterpret_cast<void*>(&impl___jump_unwind_fallback);
+                if (std::strcmp(sn, "RtlUnwind") == 0)
+                    return reinterpret_cast<void*>(&impl_RtlUnwind_fallback);
                 return nullptr;
             }
         }
@@ -1054,6 +1089,21 @@ static NTSTATUS NTAPI impl_ZwCreateFile(HANDLE* fileHandle, ULONG /*access*/,
     return STATUS_NOT_IMPLEMENTED;
 }
 
+static LONG NTAPI impl___C_specific_handler_fallback(...) {
+    return 0;
+}
+
+static VOID NTAPI impl__local_unwind_fallback(PVOID /*frame*/,
+                                               PVOID /*targetIp*/) {}
+
+static VOID NTAPI impl___jump_unwind_fallback(PVOID /*frame*/,
+                                               PVOID /*targetIp*/) {}
+
+static VOID NTAPI impl_RtlUnwind_fallback(PVOID /*targetFrame*/,
+                                           PVOID /*targetIp*/,
+                                           PVOID /*exceptionRecord*/,
+                                           PVOID /*returnValue*/) {}
+
 // ---- ETW -------------------------------------------------------------------
 
 static NTSTATUS NTAPI impl_EtwRegister(PVOID /*providerId*/,
@@ -1225,4 +1275,3 @@ static int impl__snwprintf(WCHAR* buf, std::size_t count, const WCHAR* fmt, ...)
     va_end(args);
     return ret;
 }
-
