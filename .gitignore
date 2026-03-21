@@ -15,6 +15,8 @@ Makefile
 *.exe
 *.sys
 *.dll
+# Allow pre-built test driver binaries committed to source control
+!drivers/*.sys
 *.lib
 *.a
 *.so
