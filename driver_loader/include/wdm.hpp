@@ -290,21 +290,21 @@ typedef KIRQL* PKIRQL;
 
 #ifndef _EPROCESS_DEFINED
 #define _EPROCESS_DEFINED
-struct _EPROCESS;
+struct _EPROCESS { ULONG_PTR Reserved; };
 typedef struct _EPROCESS  EPROCESS;
 typedef struct _EPROCESS* PEPROCESS;
 #endif
 
 #ifndef _ETHREAD_DEFINED
 #define _ETHREAD_DEFINED
-struct _ETHREAD;
+struct _ETHREAD  { ULONG_PTR Reserved; };
 typedef struct _ETHREAD  ETHREAD;
 typedef struct _ETHREAD* PETHREAD;
 #endif
 
 #ifndef _KTHREAD_DEFINED
 #define _KTHREAD_DEFINED
-struct _KTHREAD;
+struct _KTHREAD  { ULONG_PTR Reserved; };
 typedef struct _KTHREAD  KTHREAD;
 typedef struct _KTHREAD* PKTHREAD;
 #endif
