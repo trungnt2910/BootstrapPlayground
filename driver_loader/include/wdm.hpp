@@ -310,20 +310,13 @@ typedef struct _KTHREAD* PKTHREAD;
 #endif
 
 // ---------------------------------------------------------------------------
-// MDL (minimal definition)
+// MDL (opaque minimal placeholder for user-mode stubs)
 // ---------------------------------------------------------------------------
 
 #ifndef _MDL_DEFINED
 #define _MDL_DEFINED
 typedef struct _MDL {
-    struct _MDL* Next;
-    SHORT        Size;
-    SHORT        MdlFlags;
-    PVOID        Process;
-    PVOID        MappedSystemVa;
-    PVOID        StartVa;
-    ULONG        ByteCount;
-    ULONG        ByteOffset;
+    UCHAR Reserved[128];
 } MDL, *PMDL;
 #endif
 
