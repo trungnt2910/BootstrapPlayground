@@ -9,10 +9,12 @@
 #include <atomic>
 #include <cstdio>
 #include <cstring>
+#include <format>
 #include <fstream>
 #include <ios>
 #include <iterator>
 #include <mutex>
+#include <print>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -61,15 +63,14 @@ static LONG WINAPI entry_exception_diagnostics(EXCEPTION_POINTERS* ep) {
         access_type = er->ExceptionInformation[0];
         access_addr = er->ExceptionInformation[1];
     }
-    std::fprintf(stderr,
-        "[driver_loader] SEH: code=0x%08lX addr=%p flags=0x%08lX "
-        "access_type=%llu access_addr=%p\n",
+    std::println(stderr,
+        "[driver_loader] SEH: code=0x{:08X} addr={:p} flags=0x{:08X} "
+        "access_type={} access_addr={:p}",
         static_cast<unsigned long>(er->ExceptionCode),
         er->ExceptionAddress,
         static_cast<unsigned long>(er->ExceptionFlags),
         static_cast<unsigned long long>(access_type),
         reinterpret_cast<void*>(access_addr));
-    std::fflush(stderr);
     return EXCEPTION_CONTINUE_SEARCH;
 }
 
@@ -465,8 +466,8 @@ void DriverLoader::apply_relocations() {
             }
             default:
                 // Unknown relocation type – log a warning but continue.
-                std::fprintf(stderr,
-                    "[driver_loader] Unknown relocation type %d at offset %d\n",
+                std::println(stderr,
+                    "[driver_loader] Unknown relocation type {} at offset {}",
                     type, offset);
                 break;
             }
@@ -513,9 +514,8 @@ void DriverLoader::resolve_imports(const std::byte* /*file_data*/) {
                 // Import by ordinal.
                 const WORD ordinal =
                     static_cast<WORD>(IMAGE_ORDINAL(name_thunk->u1.Ordinal));
-                char ordinal_name[32];
-                std::snprintf(ordinal_name, sizeof(ordinal_name),
-                              "#%u", static_cast<unsigned>(ordinal));
+                const std::string ordinal_name =
+                    std::format("#{}", static_cast<unsigned>(ordinal));
                 func_addr = resolve_import(dll_name, ordinal_name);
             } else {
                 // Import by name.
@@ -548,10 +548,9 @@ void* DriverLoader::resolve_import(std::string_view dll_name,
     {
         auto it = m_extra_symbols.find(name_str);
         if (it != m_extra_symbols.end()) {
-            std::fprintf(stderr,
-                "[driver_loader] import %.*s!%s -> consumer symbol @ %p\n",
-                static_cast<int>(dll_name.size()), dll_name.data(),
-                name_str.c_str(), it->second);
+            std::println(stderr,
+                "[driver_loader] import {}!{} -> consumer symbol @ {:p}",
+                dll_name, name_str, it->second);
             return it->second;
         }
     }
@@ -562,10 +561,9 @@ void* DriverLoader::resolve_import(std::string_view dll_name,
     {
         void* addr = nt_stubs_lookup(name_str.c_str());
         if (addr) {
-            std::fprintf(stderr,
-                "[driver_loader] import %.*s!%s -> builtin symbol @ %p\n",
-                static_cast<int>(dll_name.size()), dll_name.data(),
-                name_str.c_str(), addr);
+            std::println(stderr,
+                "[driver_loader] import {}!{} -> builtin symbol @ {:p}",
+                dll_name, name_str, addr);
             return addr;
         }
 
@@ -578,16 +576,13 @@ void* DriverLoader::resolve_import(std::string_view dll_name,
 
         void* stub = nt_stubs_allocate(name_str.c_str());
         if (!is_ntoskrnl_dll) {
-            std::fprintf(stderr,
-                "[driver_loader] Warning: no symbol provided for "
-                "%.*s!%s; using stub @ %p.\n",
-                static_cast<int>(dll_name.size()), dll_name.data(),
-                name_str.c_str(), stub);
+            std::println(stderr,
+                "[driver_loader] Warning: no symbol provided for {}!{}; using stub @ {:p}.",
+                dll_name, name_str, stub);
         } else {
-            std::fprintf(stderr,
-                "[driver_loader] import %.*s!%s -> numbered stub @ %p\n",
-                static_cast<int>(dll_name.size()), dll_name.data(),
-                name_str.c_str(), stub);
+            std::println(stderr,
+                "[driver_loader] import {}!{} -> numbered stub @ {:p}",
+                dll_name, name_str, stub);
         }
         return stub;
     }
@@ -657,16 +652,14 @@ NTSTATUS DriverLoader::call_driver_entry(std::wstring_view registry_path) {
     entry_addr |= 1U;  // set Thumb interworking bit
 #endif
     auto* entry = reinterpret_cast<DriverEntryFn>(entry_addr);
-    std::fprintf(stderr, "[driver_loader] call_driver_entry -> %p\n",
+    std::println(stderr, "[driver_loader] call_driver_entry -> {:p}",
                  reinterpret_cast<void*>(entry));
-    std::fflush(stderr);
     void* veh = AddVectoredExceptionHandler(1, &entry_exception_diagnostics);
     NTSTATUS status = entry(&m_driver_object, &m_registry_path_str);
     if (veh) RemoveVectoredExceptionHandler(veh);
-    std::fprintf(stderr,
-        "[driver_loader] call_driver_entry <- 0x%08lX\n",
+    std::println(stderr,
+        "[driver_loader] call_driver_entry <- 0x{:08X}",
         static_cast<unsigned long>(status));
-    std::fflush(stderr);
     return status;
 }
 

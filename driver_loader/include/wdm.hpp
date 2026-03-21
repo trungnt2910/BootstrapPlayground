@@ -310,14 +310,21 @@ typedef struct _KTHREAD* PKTHREAD;
 #endif
 
 // ---------------------------------------------------------------------------
-// MDL (forward declaration only; full definition not needed for stubs)
+// MDL (minimal definition)
 // ---------------------------------------------------------------------------
 
 #ifndef _MDL_DEFINED
 #define _MDL_DEFINED
-struct _MDL;
-typedef struct _MDL MDL;
-typedef struct _MDL* PMDL;
+typedef struct _MDL {
+    struct _MDL* Next;
+    CSHORT       Size;
+    CSHORT       MdlFlags;
+    PVOID        Process;
+    PVOID        MappedSystemVa;
+    PVOID        StartVa;
+    ULONG        ByteCount;
+    ULONG        ByteOffset;
+} MDL, *PMDL;
 #endif
 
 // ---------------------------------------------------------------------------

@@ -43,7 +43,6 @@ jobs:
             mkdir -p "release/$ARCH"
             cp "artifacts/binaries-$ARCH/hello.exe"                       "release/$ARCH/hello.exe"
             cp "artifacts/binaries-$ARCH/test_host/test_host.exe"         "release/$ARCH/test_host.exe"
-            cp "artifacts/binaries-$ARCH/test_driver/test_driver.sys"     "release/$ARCH/test_driver.sys"
           done
 
       - name: Determine release version (YYYYMMDD.XX)

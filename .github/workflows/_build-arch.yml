@@ -189,6 +189,5 @@ jobs:
           path: |
             build/hello.exe
             build/test_host/test_host.exe
-            build/test_driver/test_driver.sys
             build/lxmonika_*.sys
           if-no-files-found: ignore

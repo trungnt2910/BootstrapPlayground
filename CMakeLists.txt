@@ -16,7 +16,6 @@ add_executable(hello hello.cpp)
 target_link_options(hello PRIVATE -static)
 
 add_subdirectory(driver_loader)
-add_subdirectory(test_driver)
 add_subdirectory(test_host)
 
 # Copy lxmonika driver binaries into the build directory so that test_host

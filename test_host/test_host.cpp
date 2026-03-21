@@ -15,9 +15,9 @@
 #include "driver_loader.hpp"
 #include "wdm.hpp"
 
-#include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <print>
 #include <stdexcept>
 #include <string>
 
@@ -35,15 +35,14 @@ static LONG WINAPI top_level_exception_filter(EXCEPTION_POINTERS* ep) {
         access_addr = er->ExceptionInformation[1];
     }
 
-    std::fprintf(stderr,
-        "[test_host] SEH: code=0x%08lX address=%p flags=0x%08lX "
-        "access_type=%llu access_addr=%p\n",
+    std::println(stderr,
+        "[test_host] SEH: code=0x{:08X} address={:p} flags=0x{:08X} "
+        "access_type={} access_addr={:p}",
         static_cast<unsigned long>(er->ExceptionCode),
         er->ExceptionAddress,
         static_cast<unsigned long>(er->ExceptionFlags),
         static_cast<unsigned long long>(access_type),
         reinterpret_cast<void*>(access_addr));
-    std::fflush(stderr);
     return EXCEPTION_CONTINUE_SEARCH;
 }
 
@@ -66,7 +65,7 @@ static LONG WINAPI top_level_exception_filter(EXCEPTION_POINTERS* ep) {
 
 extern "C" NTSTATUS NTAPI LxInitialize(PDRIVER_OBJECT /*driverObject*/,
                                         PVOID          /*subsystem*/) {
-    std::fprintf(stderr, "[test_host] LxInitialize stub called.\n");
+    std::println(stderr, "[test_host] LxInitialize stub called.");
     return STATUS_SUCCESS;
 }
 
@@ -106,7 +105,7 @@ int main(int argc, char* argv[]) {
         path_cstr = default_path;
     }
 
-    std::fprintf(stderr, "[test_host] Loading driver: %s\n", path_cstr);
+    std::println(stderr, "[test_host] Loading driver: {}", path_cstr);
 
     try {
         // DriverLoader constructor accepts std::string; construct it here
@@ -119,27 +118,27 @@ int main(int argc, char* argv[]) {
                           reinterpret_cast<void*>(&LxInitialize));
 
         loader.load();
-        std::fprintf(stderr, "[test_host] Driver mapped successfully.\n");
+        std::println(stderr, "[test_host] Driver mapped successfully.");
 
         const NTSTATUS status = loader.call_driver_entry(
             L"\\Registry\\Machine\\System\\CurrentControlSet\\Services\\lxmonika");
 
         if (!NT_SUCCESS(status)) {
-            std::fprintf(stderr,
-                "[test_host] FAIL: DriverEntry returned 0x%08lX\n",
+            std::println(stderr,
+                "[test_host] FAIL: DriverEntry returned 0x{:08X}",
                 static_cast<unsigned long>(status));
             return EXIT_FAILURE;
         }
 
-        std::fprintf(stderr,
-            "[test_host] DriverEntry returned STATUS_SUCCESS (0x%08lX).\n",
+        std::println(stderr,
+            "[test_host] DriverEntry returned STATUS_SUCCESS (0x{:08X}).",
             static_cast<unsigned long>(status));
 
-        std::fprintf(stdout, "[test_host] PASS\n");
+        std::println("[test_host] PASS");
         return EXIT_SUCCESS;
 
     } catch (const std::exception& ex) {
-        std::fprintf(stderr, "[test_host] Exception: %s\n", ex.what());
+        std::println(stderr, "[test_host] Exception: {}", ex.what());
         return EXIT_FAILURE;
     }
 }

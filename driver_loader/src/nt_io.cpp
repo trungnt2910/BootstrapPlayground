@@ -5,7 +5,8 @@ static PMDL NTAPI impl_IoAllocateMdl(PVOID /*va*/, ULONG /*byteCount*/,
                         PIRP /*irp*/) {
     std::fprintf(stderr, "[nt_stubs] call %s\n", __func__);
     std::fflush(stderr);
-    return static_cast<PMDL>(HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, 64));
+    return static_cast<PMDL>(
+        HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(MDL)));
 }
 
 static VOID NTAPI impl_IoFreeMdl(PMDL mdl) {
