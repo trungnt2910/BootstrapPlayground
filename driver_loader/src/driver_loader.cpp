@@ -6,6 +6,7 @@
 #include "nt_stubs_internal.hpp"
 
 #include <algorithm>
+#include <cstdio>
 #include <cstring>
 #include <fstream>
 #include <ios>
@@ -45,6 +46,28 @@ void* nt_stubs_lookup(const char* name) noexcept;
 static NTSTATUS NTAPI default_dispatch_fn(DEVICE_OBJECT* /*dev*/,
                                            IRP* /*irp*/) noexcept {
     return STATUS_NOT_SUPPORTED;
+}
+
+static LONG WINAPI entry_exception_diagnostics(EXCEPTION_POINTERS* ep) {
+    if (!ep || !ep->ExceptionRecord) return EXCEPTION_CONTINUE_SEARCH;
+    const EXCEPTION_RECORD* er = ep->ExceptionRecord;
+    ULONG_PTR access_type = 0;
+    ULONG_PTR access_addr = 0;
+    if (er->ExceptionCode == EXCEPTION_ACCESS_VIOLATION &&
+        er->NumberParameters >= 2) {
+        access_type = er->ExceptionInformation[0];
+        access_addr = er->ExceptionInformation[1];
+    }
+    std::fprintf(stderr,
+        "[driver_loader] SEH: code=0x%08lX addr=%p flags=0x%08lX "
+        "access_type=%llu access_addr=%p\n",
+        static_cast<unsigned long>(er->ExceptionCode),
+        er->ExceptionAddress,
+        static_cast<unsigned long>(er->ExceptionFlags),
+        static_cast<unsigned long long>(access_type),
+        reinterpret_cast<void*>(access_addr));
+    std::fflush(stderr);
+    return EXCEPTION_CONTINUE_SEARCH;
 }
 
 // ---------------------------------------------------------------------------
@@ -555,8 +578,10 @@ NTSTATUS DriverLoader::call_driver_entry(std::wstring_view registry_path) {
     entry_addr |= 1U;  // set Thumb interworking bit
 #endif
     auto* entry = reinterpret_cast<DriverEntryFn>(entry_addr);
-
-    return entry(&m_driver_object, &m_registry_path_str);
+    void* veh = AddVectoredExceptionHandler(1, &entry_exception_diagnostics);
+    NTSTATUS status = entry(&m_driver_object, &m_registry_path_str);
+    if (veh) RemoveVectoredExceptionHandler(veh);
+    return status;
 }
 
 // ---------------------------------------------------------------------------
