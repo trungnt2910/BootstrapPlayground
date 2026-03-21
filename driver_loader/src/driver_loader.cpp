@@ -578,7 +578,8 @@ NTSTATUS DriverLoader::call_driver_entry(std::wstring_view registry_path) {
     entry_addr |= 1U;  // set Thumb interworking bit
 #endif
     auto* entry = reinterpret_cast<DriverEntryFn>(entry_addr);
-    std::fprintf(stderr, "[driver_loader] call_driver_entry -> %p\n", entry);
+    std::fprintf(stderr, "[driver_loader] call_driver_entry -> %p\n",
+                 reinterpret_cast<void*>(entry));
     std::fflush(stderr);
     void* veh = AddVectoredExceptionHandler(1, &entry_exception_diagnostics);
     NTSTATUS status = entry(&m_driver_object, &m_registry_path_str);
