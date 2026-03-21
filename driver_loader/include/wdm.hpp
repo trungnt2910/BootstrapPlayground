@@ -317,8 +317,8 @@ typedef struct _KTHREAD* PKTHREAD;
 #define _MDL_DEFINED
 typedef struct _MDL {
     struct _MDL* Next;
-    CSHORT       Size;
-    CSHORT       MdlFlags;
+    SHORT        Size;
+    SHORT        MdlFlags;
     PVOID        Process;
     PVOID        MappedSystemVa;
     PVOID        StartVa;
