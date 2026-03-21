@@ -43,14 +43,14 @@ jobs:
               echo "clang_march=-march=x86-64"              >> "$GITHUB_OUTPUT"
               ;;
             ARM)
-              echo "mingw_arch=armv7"                       >> "$GITHUB_OUTPUT"
-              echo "alpine_arch=armv7"                      >> "$GITHUB_OUTPUT"
-              echo "musl_target=arm-linux-musleabihf"       >> "$GITHUB_OUTPUT"
-              echo "wine_arch=win32"                        >> "$GITHUB_OUTPUT"
-              echo "pwsh_arch=arm32"                        >> "$GITHUB_OUTPUT"
-              echo "wine_archs=arm"                         >> "$GITHUB_OUTPUT"
-              echo "alpine_host=armv7-alpine-linux-musleabihf" >> "$GITHUB_OUTPUT"
-              echo "clang_march="                           >> "$GITHUB_OUTPUT"
+              echo "mingw_arch=armv7"                          >> "$GITHUB_OUTPUT"
+              echo "alpine_arch=armv7"                         >> "$GITHUB_OUTPUT"
+              echo "musl_target=armv7-linux-musleabihf"        >> "$GITHUB_OUTPUT"
+              echo "wine_arch=win32"                           >> "$GITHUB_OUTPUT"
+              echo "pwsh_arch=arm32"                           >> "$GITHUB_OUTPUT"
+              echo "wine_archs=arm"                            >> "$GITHUB_OUTPUT"
+              echo "alpine_host=arm-linux-musleabihf"          >> "$GITHUB_OUTPUT"
+              echo "clang_march=-march=armv7-a -mfloat-abi=hard" >> "$GITHUB_OUTPUT"
               ;;
             ARM64)
               echo "mingw_arch=aarch64"                     >> "$GITHUB_OUTPUT"
@@ -159,7 +159,7 @@ jobs:
         uses: actions/cache@v5
         with:
           path: chroot.tar.zst
-          key: alpine-${{ steps.vars.outputs.alpine_arch }}-wine-${{ steps.wine_version.outputs.version }}-v10
+          key: alpine-${{ steps.vars.outputs.alpine_arch }}-wine-${{ steps.wine_version.outputs.version }}-v11
 
       - name: Create Alpine chroot with cross-compiled Wine
         if: steps.cache_chroot.outputs.cache-hit != 'true'
@@ -197,7 +197,16 @@ jobs:
           sudo chroot "$SYSROOT" apk add --no-cache \
             musl-dev \
             linux-headers \
-            zlib-dev
+            zlib-dev \
+            compiler-rt
+
+          # Determine clang resource directory and compiler-rt library path
+          # from the Alpine sysroot so that --rtlib=compiler-rt can find builtins.
+          LLVM_VER=$(ls "$SYSROOT/usr/lib/clang/" | sort -V | tail -1)
+          CLANG_RES="$SYSROOT/usr/lib/clang/$LLVM_VER"
+          RT_LIB_PATH="$SYSROOT/usr/lib/clang/$LLVM_VER/lib/linux"
+          CUSTOM_LD="lld"
+          SUPPRESS_FLAGS="-Qunused-arguments"
 
           # ── 3. Host build dependencies ─────────────────────────────────────
           sudo apt-get install -y flex bison
@@ -250,13 +259,19 @@ jobs:
             --without-xcomposite --without-xcursor --without-xfixes --without-xinerama \
             --without-xinput --without-xinput2 --without-xrandr --without-xrender \
             --without-xshape --without-xshm --without-xxf86vm \
-            CC="clang -target ${MUSL_TARGET} --sysroot=${SYSROOT} ${CLANG_MARCH}" \
-            CXX="clang++ -target ${MUSL_TARGET} --sysroot=${SYSROOT} ${CLANG_MARCH}" \
-            CFLAGS="-I${SYSROOT}/usr/include" \
-            CXXFLAGS="-I${SYSROOT}/usr/include" \
+            LD="${CUSTOM_LD}" \
+            CC="clang -target ${MUSL_TARGET} --sysroot=${SYSROOT} ${CLANG_MARCH} -resource-dir=${CLANG_RES} -fuse-ld=${CUSTOM_LD} ${SUPPRESS_FLAGS}" \
+            CXX="clang++ -target ${MUSL_TARGET} --sysroot=${SYSROOT} ${CLANG_MARCH} -resource-dir=${CLANG_RES} -fuse-ld=${CUSTOM_LD} ${SUPPRESS_FLAGS}" \
+            CFLAGS="-I${SYSROOT}/usr/include ${SUPPRESS_FLAGS}" \
+            CXXFLAGS="-I${SYSROOT}/usr/include ${SUPPRESS_FLAGS}" \
+            EXTRACFLAGS="${SUPPRESS_FLAGS}" \
             CROSSCC="${{ steps.vars.outputs.mingw_arch }}-w64-mingw32-clang" \
-            LDFLAGS="-fuse-ld=lld --rtlib=compiler-rt --unwindlib=none -L${SYSROOT}/usr/lib -L${SYSROOT}/lib" \
-            CPPFLAGS="-I${SYSROOT}/usr/include"
+            LDFLAGS="-fuse-ld=${CUSTOM_LD} --rtlib=compiler-rt --unwindlib=none -L${SYSROOT}/usr/lib -L${SYSROOT}/lib -L${RT_LIB_PATH}" \
+            CPPFLAGS="-I${SYSROOT}/usr/include" \
+            ac_cv_cflags__Werror_unused_command_line_argument=no \
+            ac_cv_cxxflags__Werror_unused_command_line_argument=no \
+            wine_cv_cflags__Werror_unused_command_line_argument=no \
+            wine_cv_cxxflags__Werror_unused_command_line_argument=no
           make -j"$(nproc)"
           sudo make DESTDIR="${SYSROOT}" install
           cd ..
