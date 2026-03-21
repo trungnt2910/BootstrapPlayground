@@ -1021,13 +1021,15 @@ static VOID NTAPI impl_IoFreeMdl(PMDL mdl) {
 }
 
 static VOID NTAPI impl_MmProbeAndLockPages(PMDL /*mdl*/, UCHAR /*accessMode*/,
-                                             ULONG /*operation*/) {}
+                                             ULONG /*operation*/) {
     std::fprintf(stderr, "[nt_stubs] call %s\n", __func__);
     std::fflush(stderr);
+}
 
-static VOID NTAPI impl_MmUnlockPages(PMDL /*mdl*/) {}
+static VOID NTAPI impl_MmUnlockPages(PMDL /*mdl*/) {
     std::fprintf(stderr, "[nt_stubs] call %s\n", __func__);
     std::fflush(stderr);
+}
 
 static PVOID NTAPI impl_MmMapLockedPagesSpecifyCache(PMDL /*mdl*/,
                         UCHAR /*accessMode*/, ULONG /*cacheType*/,
@@ -1039,9 +1041,10 @@ static PVOID NTAPI impl_MmMapLockedPagesSpecifyCache(PMDL /*mdl*/,
 }
 
 static VOID NTAPI impl_MmUnmapLockedPages(PVOID /*baseAddr*/,
-                                            PMDL /*mdl*/) {}
+                                            PMDL /*mdl*/) {
     std::fprintf(stderr, "[nt_stubs] call %s\n", __func__);
     std::fflush(stderr);
+}
 
 static NTSTATUS NTAPI impl_MmProtectMdlSystemAddress(PMDL /*mdl*/,
                                                        ULONG /*newProtect*/) {
@@ -1114,9 +1117,10 @@ static NTSTATUS NTAPI impl_IoDeleteSymbolicLink(UNICODE_STRING* /*symLink*/) {
 }
 
 static VOID FASTCALL impl_IofCompleteRequest(PIRP /*irp*/,
-                                               char /*priorityBoost*/) {}
+                                               char /*priorityBoost*/) {
     std::fprintf(stderr, "[nt_stubs] call %s\n", __func__);
     std::fflush(stderr);
+}
 
 static BOOLEAN NTAPI impl_IoIsWdmVersionAvailable(UCHAR major, UCHAR minor) {
     std::fprintf(stderr, "[nt_stubs] call %s\n", __func__);
@@ -1294,21 +1298,24 @@ static LONG impl___C_specific_handler_fallback(...) {
 }
 
 static VOID NTAPI impl__local_unwind_fallback(PVOID /*frame*/,
-                                               PVOID /*targetIp*/) {}
+                                               PVOID /*targetIp*/) {
     std::fprintf(stderr, "[nt_stubs] call %s\n", __func__);
     std::fflush(stderr);
+}
 
 static VOID NTAPI impl___jump_unwind_fallback(PVOID /*frame*/,
-                                               PVOID /*targetIp*/) {}
+                                               PVOID /*targetIp*/) {
     std::fprintf(stderr, "[nt_stubs] call %s\n", __func__);
     std::fflush(stderr);
+}
 
 static VOID NTAPI impl_RtlUnwind_fallback(PVOID /*targetFrame*/,
                                            PVOID /*targetIp*/,
                                            PVOID /*exceptionRecord*/,
-                                           PVOID /*returnValue*/) {}
+                                           PVOID /*returnValue*/) {
     std::fprintf(stderr, "[nt_stubs] call %s\n", __func__);
     std::fflush(stderr);
+}
 
 // ---- ETW -------------------------------------------------------------------
 
