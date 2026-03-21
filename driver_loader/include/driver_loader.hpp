@@ -68,14 +68,6 @@ public:
         std::wstring_view registry_path =
             L"\\Registry\\Machine\\System\\CurrentControlSet\\Services\\TestDriver");
 
-    // Invoke DllInitialize – the class-extension entry point exported by name.
-    // Signature: NTSTATUS DllInitialize(PUNICODE_STRING RegistryPath)
-    //
-    // Requires: is_loaded() == true.
-    NTSTATUS call_dll_initialize(
-        std::wstring_view registry_path =
-            L"\\Registry\\Machine\\System\\CurrentControlSet\\Services\\lxmonika");
-
     // -----------------------------------------------------------------------
     // Driver-object accessors (valid after a successful call_driver_entry)
     // -----------------------------------------------------------------------

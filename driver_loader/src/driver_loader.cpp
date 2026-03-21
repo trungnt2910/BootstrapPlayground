@@ -606,37 +606,3 @@ void* DriverLoader::get_export(std::uint16_t ordinal) const {
         return nullptr;  // Forwarded exports not resolved here.
     return rva_to_ptr(m_base, rva);
 }
-
-// ---------------------------------------------------------------------------
-// call_dll_initialize
-// ---------------------------------------------------------------------------
-
-NTSTATUS DriverLoader::call_dll_initialize(std::wstring_view registry_path) {
-    if (!m_base)
-        throw std::runtime_error(
-            "DriverLoader::call_dll_initialize() called before load()");
-
-    void* fn = get_export("DllInitialize");
-    if (!fn)
-        throw std::runtime_error(
-            "Driver does not export DllInitialize");
-
-    // Initialise registry path UNICODE_STRING.
-    m_registry_path_buf.assign(registry_path.begin(), registry_path.end());
-    m_registry_path_str.Buffer        =
-        const_cast<WCHAR*>(m_registry_path_buf.c_str());
-    m_registry_path_str.Length        =
-        static_cast<USHORT>(m_registry_path_buf.size() * sizeof(WCHAR));
-    m_registry_path_str.MaximumLength = m_registry_path_str.Length;
-
-    // On ARM32 (Thumb-2) set the interworking bit so an indirect BLX
-    // transitions to Thumb mode before executing the function.
-    using DllInitializeFn = NTSTATUS (NTAPI*)(PUNICODE_STRING);
-    auto entry_addr = reinterpret_cast<ULONG_PTR>(fn);
-#if defined(_M_ARM) || defined(__arm__)
-    entry_addr |= 1U;
-#endif
-    auto* entry = reinterpret_cast<DllInitializeFn>(entry_addr);
-
-    return entry(&m_registry_path_str);
-}

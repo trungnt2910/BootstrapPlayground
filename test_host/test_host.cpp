@@ -8,8 +8,8 @@
 // The host:
 //   1. Registers a LxInitialize consumer symbol (stub returning STATUS_SUCCESS).
 //   2. Loads the driver through DriverLoader.
-//   3. Calls the driver's DllInitialize export.
-//   4. Asserts that DllInitialize returned STATUS_SUCCESS.
+//   3. Calls the driver's DriverEntry (via the PE entry point).
+//   4. Asserts that DriverEntry returned STATUS_SUCCESS.
 //   5. Prints a success message and exits with code 0.
 
 #include "driver_loader.hpp"
@@ -95,17 +95,18 @@ int main(int argc, char* argv[]) {
         loader.load();
         std::fprintf(stderr, "[test_host] Driver mapped successfully.\n");
 
-        const NTSTATUS status = loader.call_dll_initialize();
+        const NTSTATUS status = loader.call_driver_entry(
+            L"\\Registry\\Machine\\System\\CurrentControlSet\\Services\\lxmonika");
 
         if (!NT_SUCCESS(status)) {
             std::fprintf(stderr,
-                "[test_host] FAIL: DllInitialize returned 0x%08lX\n",
+                "[test_host] FAIL: DriverEntry returned 0x%08lX\n",
                 static_cast<unsigned long>(status));
             return EXIT_FAILURE;
         }
 
         std::fprintf(stderr,
-            "[test_host] DllInitialize returned STATUS_SUCCESS (0x%08lX).\n",
+            "[test_host] DriverEntry returned STATUS_SUCCESS (0x%08lX).\n",
             static_cast<unsigned long>(status));
 
         std::fprintf(stdout, "[test_host] PASS\n");
