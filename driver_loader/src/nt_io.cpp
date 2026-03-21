@@ -8,8 +8,9 @@ static PMDL NTAPI impl_IoAllocateMdl(PVOID /*va*/, ULONG byteCount,
     std::fprintf(stderr, "[nt_stubs] call %s\n", __func__);
     std::fflush(stderr);
     constexpr SIZE_T kHeaderBytes = sizeof(MDL);
+    constexpr SIZE_T kPageSize = 0x1000u;
     const SIZE_T page_count =
-        (static_cast<SIZE_T>(byteCount) + PAGE_SIZE - 1u) / PAGE_SIZE;
+        (static_cast<SIZE_T>(byteCount) + kPageSize - 1u) / kPageSize;
     const SIZE_T max_size = (std::numeric_limits<SIZE_T>::max)();
     if (page_count > (max_size - kHeaderBytes) / sizeof(ULONG_PTR))
         return nullptr;
