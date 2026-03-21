@@ -1385,15 +1385,17 @@ static NTSTATUS NTAPI impl_WdfVersionBindClass(PVOID /*context*/,
 
 static VOID NTAPI impl_WdfVersionUnbind(PVOID /*registryPath*/,
                                           PVOID /*bindInfo*/,
-                                          PVOID /*componentGlobals*/) {}
+                                          PVOID /*componentGlobals*/) {
     std::fprintf(stderr, "[nt_stubs] call %s\n", __func__);
     std::fflush(stderr);
+}
 
 static VOID NTAPI impl_WdfVersionUnbindClass(PVOID /*context*/,
                                                PVOID /*bindInfo*/,
-                                               PVOID /*componentGlobals*/) {}
+                                               PVOID /*componentGlobals*/) {
     std::fprintf(stderr, "[nt_stubs] call %s\n", __func__);
     std::fflush(stderr);
+}
 
 static NTSTATUS NTAPI impl_WdfLdrQueryInterface(PVOID /*iface*/) {
     std::fprintf(stderr, "[nt_stubs] call %s\n", __func__);
