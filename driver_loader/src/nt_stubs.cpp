@@ -276,7 +276,7 @@ static NTSTATUS NTAPI impl_ZwCreateFile(HANDLE* fileHandle, ULONG access,
                         ULONG fileAttrs, ULONG shareAccess,
                         ULONG createDisp, ULONG createOpts,
                         PVOID eaBuffer, ULONG eaLength);
-static LONG  NTAPI impl___C_specific_handler_fallback(...);
+static LONG  impl___C_specific_handler_fallback(...);
 static VOID  NTAPI impl__local_unwind_fallback(PVOID frame, PVOID targetIp);
 static VOID  NTAPI impl___jump_unwind_fallback(PVOID frame, PVOID targetIp);
 static VOID  NTAPI impl_RtlUnwind_fallback(PVOID targetFrame, PVOID targetIp,
@@ -1089,7 +1089,7 @@ static NTSTATUS NTAPI impl_ZwCreateFile(HANDLE* fileHandle, ULONG /*access*/,
     return STATUS_NOT_IMPLEMENTED;
 }
 
-static LONG NTAPI impl___C_specific_handler_fallback(...) {
+static LONG impl___C_specific_handler_fallback(...) {
     return 0;
 }
 
