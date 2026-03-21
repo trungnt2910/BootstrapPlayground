@@ -50,9 +50,19 @@ int next_index = 0;
         (idx >= 0 && idx < 256 && name_table[static_cast<std::size_t>(idx)])
         ? name_table[static_cast<std::size_t>(idx)]
         : "<unknown>";
+    {
+        char enter_buf[320];
+        std::snprintf(enter_buf, sizeof(enter_buf),
+                      "[nt_stubs] handle_call-enter #%d name=%s\n", idx, name);
+        OutputDebugStringA(enter_buf);
+        std::fputs(enter_buf, stderr);
+        std::fflush(stderr);
+    }
     char buf[320];
     std::snprintf(buf, sizeof(buf),
+                  "[nt_stubs] handle_call-exit  #%d result=<abort> reason=unimplemented symbol=%s\n"
                   "[nt_stubs] Unimplemented ntoskrnl function called: %s (stub #%d)\n",
+                  idx, name,
                   name, idx);
     report_and_abort(buf);
 }
