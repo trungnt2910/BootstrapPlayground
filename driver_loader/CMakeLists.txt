@@ -43,7 +43,6 @@ file(WRITE "${GENERATED_STUBS}" "${_lines}")
 
 add_library(driver_loader STATIC
     src/driver_loader.cpp
-    src/call_trace.cpp
     src/nt_stubs.cpp
     "${GENERATED_STUBS}"
 )
@@ -58,5 +57,3 @@ target_include_directories(driver_loader
 # These are already available via the MinGW sysroot import libraries.
 target_link_libraries(driver_loader PUBLIC kernel32)
 
-# Diagnostics: trace entry/exit of all functions compiled in this target.
-target_compile_options(driver_loader PRIVATE -finstrument-functions)
