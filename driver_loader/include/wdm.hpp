@@ -122,6 +122,15 @@ typedef const UNICODE_STRING* PCUNICODE_STRING;
 #ifndef STATUS_NO_MEMORY
 #  define STATUS_NO_MEMORY         ((NTSTATUS)0xC0000017L)
 #endif
+#ifndef STATUS_OBJECT_NAME_NOT_FOUND
+#  define STATUS_OBJECT_NAME_NOT_FOUND ((NTSTATUS)0xC0000034L)
+#endif
+#ifndef STATUS_BUFFER_TOO_SMALL
+#  define STATUS_BUFFER_TOO_SMALL  ((NTSTATUS)0xC0000023L)
+#endif
+#ifndef STATUS_ACCESS_DENIED
+#  define STATUS_ACCESS_DENIED     ((NTSTATUS)0xC0000022L)
+#endif
 
 inline bool NT_SUCCESS(NTSTATUS st) noexcept { return st >= 0; }
 
@@ -260,3 +269,90 @@ struct _DEVICE_OBJECT {
 #define POOL_FLAG_NON_PAGED         ((ULONGLONG)0x0000000000000004ULL)
 #define POOL_FLAG_PAGED             ((ULONGLONG)0x0000000000000008ULL)
 #define POOL_FLAG_NON_PAGED_EXECUTE ((ULONGLONG)0x0000000000000010ULL)
+
+// ---------------------------------------------------------------------------
+// IRQL
+// ---------------------------------------------------------------------------
+
+#ifndef _IRQL_DEFINED
+#define _IRQL_DEFINED
+typedef UCHAR KIRQL;
+typedef KIRQL* PKIRQL;
+#endif
+
+#define PASSIVE_LEVEL  0
+#define APC_LEVEL      1
+#define DISPATCH_LEVEL 2
+
+// ---------------------------------------------------------------------------
+// Opaque kernel object types (forward declarations)
+// ---------------------------------------------------------------------------
+
+#ifndef _EPROCESS_DEFINED
+#define _EPROCESS_DEFINED
+struct _EPROCESS;
+typedef struct _EPROCESS  EPROCESS;
+typedef struct _EPROCESS* PEPROCESS;
+#endif
+
+#ifndef _ETHREAD_DEFINED
+#define _ETHREAD_DEFINED
+struct _ETHREAD;
+typedef struct _ETHREAD  ETHREAD;
+typedef struct _ETHREAD* PETHREAD;
+#endif
+
+#ifndef _KTHREAD_DEFINED
+#define _KTHREAD_DEFINED
+struct _KTHREAD;
+typedef struct _KTHREAD  KTHREAD;
+typedef struct _KTHREAD* PKTHREAD;
+#endif
+
+// ---------------------------------------------------------------------------
+// MDL (forward declaration only; full definition not needed for stubs)
+// ---------------------------------------------------------------------------
+
+#ifndef _MDL_DEFINED
+#define _MDL_DEFINED
+struct _MDL;
+typedef struct _MDL MDL;
+typedef struct _MDL* PMDL;
+#endif
+
+// ---------------------------------------------------------------------------
+// KEVENT (minimal signaled-state tracker)
+// ---------------------------------------------------------------------------
+
+#ifndef _KEVENT_DEFINED
+#define _KEVENT_DEFINED
+typedef struct _KEVENT {
+    LONG Signaled;
+} KEVENT, *PKEVENT;
+#endif
+
+// ---------------------------------------------------------------------------
+// FAST_MUTEX (minimal stub; real kernel struct is larger)
+// ---------------------------------------------------------------------------
+
+#ifndef _FAST_MUTEX_DEFINED
+#define _FAST_MUTEX_DEFINED
+typedef struct _FAST_MUTEX {
+    LONG Count;
+    PVOID Owner;
+    ULONG Contention;
+    ULONG OldIrql;
+} FAST_MUTEX, *PFAST_MUTEX;
+#endif
+
+// ---------------------------------------------------------------------------
+// SE_EXPORTS – large opaque blob; we zero-initialise it in our stubs.
+// The real WDK definition lists many privilege LUIDs and SID pointers.
+// ---------------------------------------------------------------------------
+
+#ifndef _SE_EXPORTS_DEFINED
+#define _SE_EXPORTS_DEFINED
+typedef struct _SE_EXPORTS {
+    UCHAR _opaque[1024];
+} SE_EXPORTS, *PSE_EXPORTS;
+#endif

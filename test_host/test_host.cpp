@@ -2,13 +2,14 @@
 //
 // Usage:  test_host.exe  [path/to/driver.sys]
 //
-// Default driver path: test_driver.sys (same directory as the executable).
+// Default driver path: the architecture-appropriate lxmonika_*.sys located
+// in the same directory as the executable.
 //
 // The host:
 //   1. Registers a LxInitialize consumer symbol (stub returning STATUS_SUCCESS).
 //   2. Loads the driver through DriverLoader.
-//   3. Calls the driver's DriverEntry.
-//   4. Asserts that DriverEntry returned STATUS_SUCCESS.
+//   3. Calls the driver's DllInitialize export.
+//   4. Asserts that DllInitialize returned STATUS_SUCCESS.
 //   5. Prints a success message and exits with code 0.
 
 #include "driver_loader.hpp"
@@ -21,6 +22,19 @@
 #include <string>
 
 #include <windows.h>
+
+// Select the architecture-appropriate lxmonika driver filename.
+#if defined(__x86_64__) || defined(_M_AMD64)
+#  define LXMONIKA_SYS "lxmonika_x64.sys"
+#elif defined(__i386__) || defined(_M_IX86)
+#  define LXMONIKA_SYS "lxmonika_x86.sys"
+#elif defined(__aarch64__) || defined(_M_ARM64)
+#  define LXMONIKA_SYS "lxmonika_arm64.sys"
+#elif defined(__arm__) || defined(_M_ARM)
+#  define LXMONIKA_SYS "lxmonika_arm.sys"
+#else
+#  error "Unknown target architecture – cannot select lxmonika driver"
+#endif
 
 // ---------------------------------------------------------------------------
 // Consumer-supplied stub: LxInitialize (normally exported by lxcore.sys).
@@ -61,7 +75,7 @@ int main(int argc, char* argv[]) {
         } else {
             default_path[0] = '\0';
         }
-        std::strncat(default_path, "test_driver.sys",
+        std::strncat(default_path, LXMONIKA_SYS,
                      sizeof(default_path) - std::strlen(default_path) - 1);
         path_cstr = default_path;
     }
@@ -81,40 +95,18 @@ int main(int argc, char* argv[]) {
         loader.load();
         std::fprintf(stderr, "[test_host] Driver mapped successfully.\n");
 
-        const NTSTATUS status = loader.call_driver_entry();
+        const NTSTATUS status = loader.call_dll_initialize();
 
         if (!NT_SUCCESS(status)) {
             std::fprintf(stderr,
-                "[test_host] FAIL: DriverEntry returned 0x%08lX\n",
+                "[test_host] FAIL: DllInitialize returned 0x%08lX\n",
                 static_cast<unsigned long>(status));
             return EXIT_FAILURE;
         }
 
         std::fprintf(stderr,
-            "[test_host] DriverEntry returned STATUS_SUCCESS (0x%08lX).\n",
+            "[test_host] DllInitialize returned STATUS_SUCCESS (0x%08lX).\n",
             static_cast<unsigned long>(status));
-
-        // --- Driver property queries ------------------------------------
-
-        const DRIVER_OBJECT& drv = loader.driver_object();
-        std::fprintf(stderr,
-            "[test_host] DriverObject.DriverName = %.*ls\n",
-            static_cast<int>(drv.DriverName.Length / sizeof(wchar_t)),
-            drv.DriverName.Buffer);
-
-        if (drv.DeviceObject) {
-            std::fprintf(stderr, "[test_host] DeviceObject registered at %p\n",
-                static_cast<void*>(drv.DeviceObject));
-        } else {
-            std::fprintf(stderr, "[test_host] No device objects registered.\n");
-        }
-
-        if (drv.DriverUnload) {
-            std::fprintf(stderr, "[test_host] DriverUnload registered at %p\n",
-                reinterpret_cast<void*>(drv.DriverUnload));
-        } else {
-            std::fprintf(stderr, "[test_host] No DriverUnload callback.\n");
-        }
 
         std::fprintf(stdout, "[test_host] PASS\n");
         return EXIT_SUCCESS;

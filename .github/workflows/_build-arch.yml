@@ -27,24 +27,28 @@ jobs:
               echo "debian_arch=i386"                      >> "$GITHUB_OUTPUT"
               echo "debian_multiarch=i386-linux-gnu"       >> "$GITHUB_OUTPUT"
               echo "wine_arch=win32"                       >> "$GITHUB_OUTPUT"
+              echo "lxmonika_sys=lxmonika_x86.sys"         >> "$GITHUB_OUTPUT"
               ;;
             x64)
               echo "mingw_arch=x86_64"                     >> "$GITHUB_OUTPUT"
               echo "debian_arch=amd64"                     >> "$GITHUB_OUTPUT"
               echo "debian_multiarch=x86_64-linux-gnu"     >> "$GITHUB_OUTPUT"
               echo "wine_arch=win64"                       >> "$GITHUB_OUTPUT"
+              echo "lxmonika_sys=lxmonika_x64.sys"         >> "$GITHUB_OUTPUT"
               ;;
             ARM)
               echo "mingw_arch=armv7"                      >> "$GITHUB_OUTPUT"
               echo "debian_arch=armhf"                     >> "$GITHUB_OUTPUT"
               echo "debian_multiarch=arm-linux-gnueabihf"  >> "$GITHUB_OUTPUT"
               echo "wine_arch=win32"                       >> "$GITHUB_OUTPUT"
+              echo "lxmonika_sys=lxmonika_arm.sys"         >> "$GITHUB_OUTPUT"
               ;;
             ARM64)
               echo "mingw_arch=aarch64"                    >> "$GITHUB_OUTPUT"
               echo "debian_arch=arm64"                     >> "$GITHUB_OUTPUT"
               echo "debian_multiarch=aarch64-linux-gnu"    >> "$GITHUB_OUTPUT"
               echo "wine_arch=win64"                       >> "$GITHUB_OUTPUT"
+              echo "lxmonika_sys=lxmonika_arm64.sys"       >> "$GITHUB_OUTPUT"
               ;;
           esac
 
@@ -196,14 +200,14 @@ jobs:
           sudo chroot rootfs env HOME=/tmp wineserver -w
 
           # Step 3: Run the driver test host.
-          # The driver .sys path is passed as a Windows-style path via Wine's Z: drive,
-          # which maps the root filesystem.
+          # The lxmonika .sys path is passed as a Windows-style path via Wine's
+          # Z: drive, which maps the root filesystem.
           sudo chroot rootfs \
             env HOME=/tmp WINEDEBUG=-all \
                 WINEDLLPATH=/usr/lib/${{ steps.vars.outputs.debian_multiarch }}/wine \
                 WINEARCH=${{ steps.vars.outputs.wine_arch }} \
             wine /mnt/work/build/test_host/test_host.exe \
-            'Z:\mnt\work\build\test_driver\test_driver.sys'
+            'Z:\mnt\work\build\${{ steps.vars.outputs.lxmonika_sys }}'
 
       # ── Artifact upload ─────────────────────────────────────────────────────
 
@@ -216,4 +220,5 @@ jobs:
             build/hello.exe
             build/test_host/test_host.exe
             build/test_driver/test_driver.sys
+            build/lxmonika_*.sys
           if-no-files-found: ignore
