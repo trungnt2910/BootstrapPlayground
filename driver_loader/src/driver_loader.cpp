@@ -440,19 +440,32 @@ void DriverLoader::resolve_imports(const std::byte* /*file_data*/) {
 
 void* DriverLoader::resolve_import(std::string_view dll_name,
                                     std::string_view func_name) {
+    std::string name_str(func_name);
+
     // 1. Consumer-supplied override (highest priority).
     {
-        auto it = m_extra_symbols.find(std::string(func_name));
-        if (it != m_extra_symbols.end()) return it->second;
+        auto it = m_extra_symbols.find(name_str);
+        if (it != m_extra_symbols.end()) {
+            std::fprintf(stderr,
+                "[driver_loader] import %.*s!%s -> consumer symbol @ %p\n",
+                static_cast<int>(dll_name.size()), dll_name.data(),
+                name_str.c_str(), it->second);
+            return it->second;
+        }
     }
 
     // 2. Built-in symbol table – checked for ALL DLLs.
     //    Kernel DLL function names are globally unique, so a single flat
     //    table covers ntoskrnl, hal, wdfldr, cng, etc.
     {
-        std::string name_str(func_name);
         void* addr = nt_stubs_lookup(name_str.c_str());
-        if (addr) return addr;
+        if (addr) {
+            std::fprintf(stderr,
+                "[driver_loader] import %.*s!%s -> builtin symbol @ %p\n",
+                static_cast<int>(dll_name.size()), dll_name.data(),
+                name_str.c_str(), addr);
+            return addr;
+        }
 
         // 3. Numbered stub for any unrecognised import.
         const bool is_ntoskrnl_dll =
@@ -461,14 +474,20 @@ void* DriverLoader::resolve_import(std::string_view dll_name,
             iequal(dll_name, "ntkrnlmp.exe") ||
             iequal(dll_name, "ntkrpamp.exe");
 
+        void* stub = nt_stubs_allocate(name_str.c_str());
         if (!is_ntoskrnl_dll) {
             std::fprintf(stderr,
                 "[driver_loader] Warning: no symbol provided for "
-                "%.*s!%s; using stub.\n",
+                "%.*s!%s; using stub @ %p.\n",
                 static_cast<int>(dll_name.size()), dll_name.data(),
-                name_str.c_str());
+                name_str.c_str(), stub);
+        } else {
+            std::fprintf(stderr,
+                "[driver_loader] import %.*s!%s -> numbered stub @ %p\n",
+                static_cast<int>(dll_name.size()), dll_name.data(),
+                name_str.c_str(), stub);
         }
-        return nt_stubs_allocate(name_str.c_str());
+        return stub;
     }
 }
 

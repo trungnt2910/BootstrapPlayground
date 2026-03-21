@@ -529,14 +529,22 @@ void* nt_stubs_lookup(const char* name) noexcept {
                 HMODULE m = GetModuleHandleA("ntdll.dll");
                 if (m) {
                     void* p = reinterpret_cast<void*>(GetProcAddress(m, sn));
-                    if (p) return p;
+                    if (p) {
+                        std::fprintf(stderr,
+                            "[nt_stubs] lookup %s -> ntdll @ %p\n", name, p);
+                        return p;
+                    }
                 }
                 // _local_unwind / __jump_unwind may be in msvcrt.dll.
                 m = GetModuleHandleA("msvcrt.dll");
                 if (!m) m = LoadLibraryA("msvcrt.dll");
                 if (m) {
                     void* p = reinterpret_cast<void*>(GetProcAddress(m, sn));
-                    if (p) return p;
+                    if (p) {
+                        std::fprintf(stderr,
+                            "[nt_stubs] lookup %s -> msvcrt @ %p\n", name, p);
+                        return p;
+                    }
                 }
                 // Fallback to no-op helpers so DriverEntry can continue on
                 // runtimes where these exports are absent.
@@ -561,8 +569,13 @@ void* nt_stubs_lookup(const char* name) noexcept {
     }
 
     for (const auto& sym : s_nt_symbols) {
-        if (std::strcmp(sym.name, name) == 0) return sym.address;
+        if (std::strcmp(sym.name, name) == 0) {
+            std::fprintf(stderr,
+                "[nt_stubs] lookup %s -> builtin @ %p\n", name, sym.address);
+            return sym.address;
+        }
     }
+    std::fprintf(stderr, "[nt_stubs] lookup %s -> <unresolved>\n", name);
     return nullptr;
 }
 
