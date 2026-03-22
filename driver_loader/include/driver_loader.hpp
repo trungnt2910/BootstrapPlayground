@@ -136,6 +136,11 @@ public:
     // Find a loaded debug symbol by name from DbgHelp.
     // Returns nullptr if symbols are not loaded or the symbol is not found.
     [[nodiscard]] void* GetDebugSymbol(const std::string& name) const;
+    // Find a loaded debug symbol range [start, end) from DbgHelp.
+    // Returns false if symbols are not loaded or the symbol/range is unavailable.
+    [[nodiscard]] bool GetDebugSymbolRange(const std::string& name,
+                                           std::uintptr_t& start,
+                                           std::uintptr_t& end_exclusive) const;
 
     template<typename T>
     [[nodiscard]] T* GetDebugSymbol(const std::string& name) const {
