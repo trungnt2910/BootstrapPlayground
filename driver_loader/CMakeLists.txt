@@ -56,3 +56,6 @@ target_include_directories(driver_loader
 # HeapAlloc, WideCharToMultiByte, etc.
 # These are already available via the MinGW sysroot import libraries.
 target_link_libraries(driver_loader PUBLIC kernel32 dbghelp)
+
+target_compile_options(driver_loader PRIVATE -gcodeview)
+
