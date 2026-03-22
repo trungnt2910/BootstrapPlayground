@@ -15,10 +15,10 @@ static VOID NTAPI impl_WdfStubTableEntry2() {
     std::flush(std::cerr);
 }
 
-static PVOID s_wdf_function_table_stub[] = {
-    &impl_WdfStubTableEntry0,
-    &impl_WdfStubTableEntry1,
-    &impl_WdfStubTableEntry2,
+static WDFFUNC s_wdf_function_table_stub[] = {
+    impl_WdfStubTableEntry0,
+    impl_WdfStubTableEntry1,
+    impl_WdfStubTableEntry2,
 };
 
 static NTSTATUS NTAPI impl_WdfVersionBind(PDRIVER_OBJECT driverObject,
@@ -38,29 +38,25 @@ static NTSTATUS NTAPI impl_WdfVersionBind(PDRIVER_OBJECT driverObject,
         return STATUS_INVALID_PARAMETER;
     }
 
-    bindInfo->FuncCount = static_cast<ULONG>(std::size(s_wdf_function_table_stub));
+    bindInfo->FuncCount = static_cast<ULONG>(
+        sizeof(s_wdf_function_table_stub) / sizeof(s_wdf_function_table_stub[0]));
     bindInfo->Module = driverObject;
     if (bindInfo->FuncTable == nullptr) {
-        bindInfo->FuncTable = reinterpret_cast<PVOID>(s_wdf_function_table_stub);
+        bindInfo->FuncTable = s_wdf_function_table_stub;
     }
 
-    auto& globals = loader->WdfComponentGlobals();
     auto& driver_globals = loader->WdfDriverGlobals();
     driver_globals.Driver = driverObject;
     driver_globals.DriverFlags = 0;
     driver_globals.DisplaceDriverUnload = 0;
 
-    globals.Size = sizeof(WDF_COMPONENT_GLOBALS);
-    globals.DriverGlobals = &driver_globals;
-    globals.FuncTable = bindInfo->FuncTable;
-    globals.FuncCount = bindInfo->FuncCount;
-    *componentGlobals = &globals;
+    *componentGlobals = nullptr;
     std::println(stderr,
-        "[nt_stubs] {}: FuncTable={:p} FuncCount={} Globals={:p}",
+        "[nt_stubs] {}: FuncTable={:p} FuncCount={} ComponentGlobals={:p}",
         __func__,
-        bindInfo->FuncTable,
+        static_cast<void*>(bindInfo->FuncTable),
         static_cast<unsigned long>(bindInfo->FuncCount),
-        static_cast<void*>(&globals));
+        static_cast<void*>(*componentGlobals));
     std::flush(std::cerr);
     return STATUS_SUCCESS;
 }
@@ -81,14 +77,7 @@ static VOID NTAPI impl_WdfVersionUnbind(PUNICODE_STRING /*registryPath*/,
                                           PWDF_COMPONENT_GLOBALS componentGlobals) {
     std::println(stderr, "[nt_stubs] call {}", __func__);
     std::flush(std::cerr);
-    if (componentGlobals) {
-        if (componentGlobals->DriverGlobals) {
-            componentGlobals->DriverGlobals->Driver = nullptr;
-        }
-        componentGlobals->DriverGlobals = nullptr;
-        componentGlobals->FuncTable = nullptr;
-        componentGlobals->FuncCount = 0;
-    }
+    (void)componentGlobals;
 }
 
 static VOID NTAPI impl_WdfVersionUnbindClass(PVOID /*context*/,

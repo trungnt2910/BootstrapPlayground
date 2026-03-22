@@ -784,9 +784,6 @@ NTSTATUS DriverLoader::CallDriverEntry(
     m_wdf_driver_globals.Driver = &m_driver_object;
     m_wdf_driver_globals.DriverTag = kWdfDriverTag;
     CopyDriverNameToWdfGlobals(m_driver_name, m_wdf_driver_globals.DriverName);
-    m_wdf_component_globals = {};
-    m_wdf_component_globals.Size = sizeof(WDF_COMPONENT_GLOBALS);
-    m_wdf_component_globals.DriverGlobals = &m_wdf_driver_globals;
     {
         std::lock_guard<std::mutex> lock(s_driver_object_map_mutex);
         s_driver_object_map[&m_driver_object] = this;

@@ -145,7 +145,6 @@ public:
 
     [[nodiscard]] void* GetBase() const noexcept { return m_base; }
     [[nodiscard]] WDF_DRIVER_GLOBALS& WdfDriverGlobals() noexcept { return m_wdf_driver_globals; }
-    [[nodiscard]] WDF_COMPONENT_GLOBALS& WdfComponentGlobals() noexcept { return m_wdf_component_globals; }
     [[nodiscard]] static DriverLoader* FromDriverObject(const DRIVER_OBJECT* driver_object) noexcept;
 
 private:
@@ -199,7 +198,6 @@ private:
     std::uint64_t m_dbghelp_module_base = 0;
 
     WDF_DRIVER_GLOBALS m_wdf_driver_globals = {};
-    WDF_COMPONENT_GLOBALS m_wdf_component_globals = {};
 
     static std::unordered_map<const DRIVER_OBJECT*, DriverLoader*> s_driver_object_map;
     static std::mutex s_driver_object_map_mutex;

@@ -1,8 +1,10 @@
 cmake_minimum_required(VERSION 3.24)
 
 # ---------------------------------------------------------------------------
-# Generate the 256 numbered stubs at configure time.
+# Generate the numbered stubs at configure time.
 # ---------------------------------------------------------------------------
+
+set(STUB_SLOT_COUNT 444)
 
 set(GENERATED_STUBS "${CMAKE_CURRENT_BINARY_DIR}/nt_stubs_generated.cpp")
 
@@ -13,7 +15,8 @@ string(APPEND _lines "#include <utility>  // std::unreachable\n\n")
 
 set(_table "static const nt_stubs_internal::stub_fn_t s_stub_table[] = {\n")
 
-foreach(i RANGE 255)
+math(EXPR STUB_SLOT_MAX_INDEX "${STUB_SLOT_COUNT} - 1")
+foreach(i RANGE ${STUB_SLOT_MAX_INDEX})
     string(APPEND _lines
         "[[gnu::noinline, gnu::used]] static void* nt_stub_${i}() noexcept {\n"
         "    volatile int idx = ${i};\n"

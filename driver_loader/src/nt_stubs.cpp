@@ -1,6 +1,6 @@
 // nt_stubs.cpp – Stub infrastructure + implementations of ntoskrnl.exe exports.
 //
-// The 256 numbered "abort" stubs are generated at configure-time into
+// The numbered "abort" stubs are generated at configure-time into
 // nt_stubs_generated.cpp by CMakeLists.txt.  This file provides:
 //   • The shared state (name_table, next_index, handle_call).
 //   • The public helper used by DriverLoader to allocate a stub slot.
@@ -34,7 +34,7 @@
 
 namespace nt_stubs_internal {
 
-std::array<const char*, 256> name_table = {};
+std::array<const char*, static_cast<std::size_t>(kStubSlotCount)> name_table = {};
 int next_index = 0;
 
 [[noreturn]] static void report_and_abort(const char* msg) noexcept {
@@ -53,7 +53,7 @@ int next_index = 0;
 
 [[noreturn]] void handle_call(int idx) noexcept {
     const char* name =
-        (idx >= 0 && idx < 256 && name_table[static_cast<std::size_t>(idx)])
+        (idx >= 0 && idx < kStubSlotCount && name_table[static_cast<std::size_t>(idx)])
         ? name_table[static_cast<std::size_t>(idx)]
         : "<unknown>";
     {
@@ -73,26 +73,27 @@ int next_index = 0;
 } // namespace nt_stubs_internal
 
 // ---------------------------------------------------------------------------
-// Fallback stub – used when all 256 numbered slots are exhausted.
+// Fallback stub – used when all generated stub slots are exhausted.
 // ---------------------------------------------------------------------------
 
 static void* fallback_stub() noexcept {
     nt_stubs_internal::report_and_abort(
-        "[nt_stubs] An ntoskrnl stub was called but all 256 stub slots are "
+        "[nt_stubs] An ntoskrnl stub was called but all generated stub slots are "
         "exhausted.\n");
 }
 
 // ---------------------------------------------------------------------------
 // Public helper: allocate a numbered stub slot for 'name'.
 // Returns the stub function pointer, or the fallback stub pointer if all
-// 256 slots are taken.
+// all slots are taken.
 // ---------------------------------------------------------------------------
 
 void* nt_stubs_allocate(const char* name) noexcept {
     using namespace nt_stubs_internal;
-    if (next_index >= 256) {
+    if (next_index >= kStubSlotCount) {
         std::println(stderr,
-            "[nt_stubs] Warning: more than 256 stubs requested; '{}' will use the fallback stub.",
+            "[nt_stubs] Warning: more than {} stubs requested; '{}' will use the fallback stub.",
+            kStubSlotCount,
             name ? name : "<null>");
         return reinterpret_cast<void*>(&fallback_stub);
     }
