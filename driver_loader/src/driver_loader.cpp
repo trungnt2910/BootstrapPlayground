@@ -59,84 +59,96 @@ static NTSTATUS NTAPI default_dispatch_fn(DEVICE_OBJECT* /*dev*/,
 
 #if defined(_M_X64) || defined(__x86_64__)
 namespace {
-thread_local std::uint8_t g_emulated_irql = 0; // PASSIVE_LEVEL
 thread_local DriverLoader* g_active_entry_loader = nullptr;
 
-static ULONG64* context_gpr_by_rm(CONTEXT* ctx, std::uint8_t rm) noexcept {
-    switch (rm & 0x07U) {
-        case 0: return &ctx->Rax;
-        case 1: return &ctx->Rcx;
-        case 2: return &ctx->Rdx;
-        case 3: return &ctx->Rbx;
-        case 4: return &ctx->Rsp;
-        case 5: return &ctx->Rbp;
-        case 6: return &ctx->Rsi;
-        case 7: return &ctx->Rdi;
-        default: return nullptr;
+struct NextSymbolSearch {
+    DWORD64 start;
+    DWORD64 next;
+};
+
+static BOOL CALLBACK find_next_symbol_cb(PSYMBOL_INFO symbol_info,
+                                         ULONG /*symbol_size*/,
+                                         PVOID user_context) {
+    if (!symbol_info || !user_context) return TRUE;
+    auto* search = static_cast<NextSymbolSearch*>(user_context);
+    if (symbol_info->Address > search->start &&
+        (search->next == 0 || symbol_info->Address < search->next)) {
+        search->next = symbol_info->Address;
     }
+    return TRUE;
+}
+
+static bool resolve_kegetcurrentirql_range_from_pdb(
+    DriverLoader* loader,
+    std::uintptr_t& symbol_start,
+    std::uintptr_t& symbol_end_exclusive) noexcept {
+    symbol_start = 0;
+    symbol_end_exclusive = 0;
+    if (!loader) return false;
+
+    void* sym = loader->GetDebugSymbol("KeGetCurrentIrql");
+    if (!sym) return false;
+
+    const DWORD64 start = static_cast<DWORD64>(reinterpret_cast<std::uintptr_t>(sym));
+    if (start == 0) return false;
+
+    const HANDLE process = GetCurrentProcess();
+    DWORD64 end_exclusive = 0;
+
+    SYMBOL_INFO_PACKAGE sip = {};
+    sip.si.SizeOfStruct = sizeof(SYMBOL_INFO);
+    sip.si.MaxNameLen = MAX_SYM_NAME;
+    DWORD64 displacement = 0;
+    if (SymFromAddr(process, start, &displacement, &sip.si) && sip.si.Size > 0) {
+        end_exclusive = start + sip.si.Size;
+    }
+
+    if (end_exclusive <= start) {
+        const DWORD64 module_base = SymGetModuleBase64(process, start);
+        if (module_base != 0) {
+            NextSymbolSearch search{};
+            search.start = start;
+            search.next = 0;
+            if (SymEnumSymbols(process, module_base, nullptr, &find_next_symbol_cb, &search) &&
+                search.next > start) {
+                end_exclusive = search.next;
+            }
+        }
+    }
+
+    if (end_exclusive <= start) {
+        return false;
+    }
+
+    symbol_start = static_cast<std::uintptr_t>(start);
+    symbol_end_exclusive = static_cast<std::uintptr_t>(end_exclusive);
+    return true;
 }
 
 static bool route_kegetcurrentirql_to_stub(EXCEPTION_POINTERS* ep) noexcept {
     if (!ep || !ep->ExceptionRecord || !ep->ContextRecord) return false;
     if (ep->ExceptionRecord->ExceptionCode != EXCEPTION_PRIV_INSTRUCTION) return false;
 
-    const auto* ip = static_cast<const std::uint8_t*>(ep->ExceptionRecord->ExceptionAddress);
-    if (!ip) return false;
-
-    // Route x64 CR8 reads emitted by KeGetCurrentIrql to the named stub:
-    //   44 0F 20 Cx  => mov r64, cr8
-    if (ip[0] != 0x44 || ip[1] != 0x0F || ip[2] != 0x20) {
+    std::uintptr_t symbol_start = 0;
+    std::uintptr_t symbol_end_exclusive = 0;
+    if (!resolve_kegetcurrentirql_range_from_pdb(
+            g_active_entry_loader, symbol_start, symbol_end_exclusive)) {
         return false;
     }
 
-    const std::uint8_t modrm = ip[3];
-    if ((modrm & 0xC0U) != 0xC0U) return false;                // mod must be register-direct
-    if (((modrm >> 3U) & 0x07U) != 0x00U) return false;        // control register index 0 + REX.R => CR8
-
-    CONTEXT* const ctx = ep->ContextRecord;
-    ULONG64* const gpr = context_gpr_by_rm(ctx, modrm & 0x07U);
-    if (!gpr) return false;
+    const std::uintptr_t fault_ip =
+        reinterpret_cast<std::uintptr_t>(ep->ExceptionRecord->ExceptionAddress);
+    if (fault_ip < symbol_start) return false;
+    if (symbol_end_exclusive != 0 && fault_ip >= symbol_end_exclusive) return false;
 
     const auto* ke_get_current_irql = reinterpret_cast<ULONG64*>(nt_stubs_lookup("KeGetCurrentIrql"));
     if (!ke_get_current_irql) return false;
 
-    // Continue execution at the KeGetCurrentIrql stub. Keep the register target
-    // from MOV r64, CR8 in RCX so the stub can optionally inspect/debug it.
-    ctx->Rcx = *gpr;
-    ctx->Rip = reinterpret_cast<ULONG64>(ke_get_current_irql);
+    ep->ContextRecord->Rip = reinterpret_cast<ULONG64>(ke_get_current_irql);
     std::println(stderr,
-        "[driver_loader] redirected privileged CR8 read at {:p} to KeGetCurrentIrql stub {:p}",
+        "[driver_loader] redirected privileged instruction at {:p} to KeGetCurrentIrql stub {:p}",
         ep->ExceptionRecord->ExceptionAddress,
         reinterpret_cast<void*>(ke_get_current_irql));
-    return true;
-}
-
-static bool emulate_privileged_cr8_write(EXCEPTION_POINTERS* ep) noexcept {
-    if (!ep || !ep->ExceptionRecord || !ep->ContextRecord) return false;
-    if (ep->ExceptionRecord->ExceptionCode != EXCEPTION_PRIV_INSTRUCTION) return false;
-
-    const auto* ip = static_cast<const std::uint8_t*>(ep->ExceptionRecord->ExceptionAddress);
-    if (!ip) return false;
-
-    // Emulate x64 CR8 writes that can still appear in IRQL-raise paths:
-    //   44 0F 22 Cx  => mov cr8, r64
-    if (ip[0] != 0x44 || ip[1] != 0x0F || ip[2] != 0x22) {
-        return false;
-    }
-
-    const std::uint8_t modrm = ip[3];
-    if ((modrm & 0xC0U) != 0xC0U) return false;
-    if (((modrm >> 3U) & 0x07U) != 0x00U) return false;
-
-    CONTEXT* const ctx = ep->ContextRecord;
-    ULONG64* const gpr = context_gpr_by_rm(ctx, modrm & 0x07U);
-    if (!gpr) return false;
-
-    g_emulated_irql = static_cast<std::uint8_t>(*gpr & 0xFFU);
-    ctx->Rip += 4;
-    std::println(stderr,
-        "[driver_loader] emulated privileged CR8 write at {:p}",
-        ep->ExceptionRecord->ExceptionAddress);
     return true;
 }
 
@@ -223,9 +235,6 @@ static LONG WINAPI entry_exception_diagnostics(EXCEPTION_POINTERS* ep) {
     if (!ep || !ep->ExceptionRecord) return EXCEPTION_CONTINUE_SEARCH;
 #if defined(_M_X64) || defined(__x86_64__)
     if (route_kegetcurrentirql_to_stub(ep)) {
-        return EXCEPTION_CONTINUE_EXECUTION;
-    }
-    if (emulate_privileged_cr8_write(ep)) {
         return EXCEPTION_CONTINUE_EXECUTION;
     }
     {
