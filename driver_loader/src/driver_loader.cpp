@@ -61,48 +61,6 @@ static NTSTATUS NTAPI default_dispatch_fn(DEVICE_OBJECT* /*dev*/,
 namespace {
 thread_local DriverLoader* g_active_entry_loader = nullptr;
 
-static bool resolve_symbol_range(DriverLoader* loader,
-                                 const char* symbol_name,
-                                 std::uintptr_t& symbol_start,
-                                 std::uintptr_t& symbol_end_exclusive) noexcept {
-    symbol_start = 0;
-    symbol_end_exclusive = 0;
-    if (!loader || !symbol_name) return false;
-    return loader->GetDebugSymbolRange(symbol_name, symbol_start, symbol_end_exclusive);
-}
-
-static bool route_privileged_ip_to_function(CONTEXT* context_record,
-                                            const void* fault_address,
-                                            const std::uintptr_t symbol_start,
-                                            const std::uintptr_t symbol_end_exclusive,
-                                            const void* target_function) noexcept {
-    if (!context_record || !fault_address || !target_function) return false;
-    const std::uintptr_t fault_ip = reinterpret_cast<std::uintptr_t>(fault_address);
-    if (fault_ip < symbol_start || fault_ip >= symbol_end_exclusive) return false;
-    context_record->Rip = reinterpret_cast<DWORD64>(target_function);
-    return true;
-}
-
-static bool route_kegetcurrentirql_to_stub(EXCEPTION_POINTERS* ep,
-                                           const std::uintptr_t symbol_start,
-                                           const std::uintptr_t symbol_end_exclusive,
-                                           const void* ke_get_current_irql_stub) noexcept {
-    if (!ep || !ep->ExceptionRecord || !ep->ContextRecord) return false;
-    if (ep->ExceptionRecord->ExceptionCode != EXCEPTION_PRIV_INSTRUCTION) return false;
-    if (!route_privileged_ip_to_function(ep->ContextRecord,
-                                         ep->ExceptionRecord->ExceptionAddress,
-                                         symbol_start,
-                                         symbol_end_exclusive,
-                                         ke_get_current_irql_stub)) {
-        return false;
-    }
-    std::println(stderr,
-        "[driver_loader] redirected privileged instruction at {:p} to KeGetCurrentIrql stub {:p}",
-        ep->ExceptionRecord->ExceptionAddress,
-        ke_get_current_irql_stub);
-    return true;
-}
-
 static void print_dbghelp_stack_trace(EXCEPTION_POINTERS* ep) {
     if (!ep || !ep->ContextRecord) return;
 
@@ -182,53 +140,6 @@ static void print_dbghelp_stack_trace(EXCEPTION_POINTERS* ep) {
 } // namespace
 #endif
 
-static LONG WINAPI entry_exception_diagnostics(EXCEPTION_POINTERS* ep) {
-    if (!ep || !ep->ExceptionRecord) return EXCEPTION_CONTINUE_SEARCH;
-#if defined(_M_X64) || defined(__x86_64__)
-    std::uintptr_t ke_get_current_irql_start = 0;
-    std::uintptr_t ke_get_current_irql_end_exclusive = 0;
-    if (resolve_symbol_range(g_active_entry_loader,
-                             "KeGetCurrentIrql",
-                             ke_get_current_irql_start,
-                             ke_get_current_irql_end_exclusive)) {
-        const void* ke_get_current_irql_stub = nt_stubs_lookup("KeGetCurrentIrql");
-        if (!ke_get_current_irql_stub) {
-            std::println(stderr,
-                "[driver_loader] failed to find KeGetCurrentIrql stub for privileged-instruction redirection");
-        }
-        if (route_kegetcurrentirql_to_stub(ep,
-                                           ke_get_current_irql_start,
-                                           ke_get_current_irql_end_exclusive,
-                                           ke_get_current_irql_stub)) {
-            return EXCEPTION_CONTINUE_EXECUTION;
-        }
-    }
-    {
-        std::lock_guard<std::mutex> lock(s_dbghelp_mu);
-        if (s_dbghelp_initialized && g_active_entry_loader != nullptr) {
-            print_dbghelp_stack_trace(ep);
-        }
-    }
-#endif
-    const EXCEPTION_RECORD* er = ep->ExceptionRecord;
-    ULONG_PTR access_type = 0;
-    ULONG_PTR access_addr = 0;
-    if (er->ExceptionCode == EXCEPTION_ACCESS_VIOLATION &&
-        er->NumberParameters >= 2) {
-        access_type = er->ExceptionInformation[0];
-        access_addr = er->ExceptionInformation[1];
-    }
-    std::println(stderr,
-        "[driver_loader] SEH: code=0x{:08X} addr={:p} flags=0x{:08X} "
-        "access_type={} access_addr={:p}",
-        static_cast<unsigned long>(er->ExceptionCode),
-        er->ExceptionAddress,
-        static_cast<unsigned long>(er->ExceptionFlags),
-        static_cast<unsigned long long>(access_type),
-        reinterpret_cast<void*>(access_addr));
-    return EXCEPTION_CONTINUE_SEARCH;
-}
-
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -282,6 +193,86 @@ bool iequal(std::string_view a, std::string_view b) noexcept {
 std::mutex        s_dbghelp_mu;
 std::atomic<int>  s_dbghelp_refcount{0};
 bool              s_dbghelp_initialized = false;
+
+struct DebugSymbolRange final {
+    std::uintptr_t start = 0;
+    std::uintptr_t end_exclusive = 0;
+};
+
+[[nodiscard]] bool TryResolveSymbolRange(DriverLoader* loader,
+                                         const char* symbol_name,
+                                         DebugSymbolRange& range) noexcept {
+    range = {};
+    if (!loader || !symbol_name) return false;
+    return loader->GetDebugSymbolRange(symbol_name, range.start, range.end_exclusive);
+}
+
+[[nodiscard]] bool TryRedirectPrivilegedInstruction(EXCEPTION_POINTERS* ep,
+                                                    const DebugSymbolRange& range,
+                                                    const void* target_function) noexcept {
+    if (!ep || !ep->ExceptionRecord || !ep->ContextRecord || !target_function) {
+        return false;
+    }
+    if (ep->ExceptionRecord->ExceptionCode != EXCEPTION_PRIV_INSTRUCTION) {
+        return false;
+    }
+    const std::uintptr_t fault_ip =
+        reinterpret_cast<std::uintptr_t>(ep->ExceptionRecord->ExceptionAddress);
+    if (fault_ip < range.start || fault_ip >= range.end_exclusive) {
+        return false;
+    }
+#if defined(_M_X64) || defined(__x86_64__)
+    ep->ContextRecord->Rip = reinterpret_cast<DWORD64>(target_function);
+#elif defined(_M_IX86) || defined(__i386__)
+    ep->ContextRecord->Eip = reinterpret_cast<DWORD>(target_function);
+#elif defined(_M_ARM64) || defined(__aarch64__) || defined(_M_ARM) || defined(__arm__)
+    ep->ContextRecord->Pc = reinterpret_cast<DWORD64>(target_function);
+#else
+    return false;
+#endif
+    return true;
+}
+
+LONG WINAPI entry_exception_diagnostics(EXCEPTION_POINTERS* ep) {
+    if (!ep || !ep->ExceptionRecord) return EXCEPTION_CONTINUE_SEARCH;
+#if defined(_M_X64) || defined(__x86_64__)
+    DebugSymbolRange ke_get_current_irql_range{};
+    if (TryResolveSymbolRange(g_active_entry_loader, "KeGetCurrentIrql", ke_get_current_irql_range)) {
+        const void* ke_get_current_irql_stub = nt_stubs_lookup("KeGetCurrentIrql");
+        if (ke_get_current_irql_stub != nullptr &&
+            TryRedirectPrivilegedInstruction(ep, ke_get_current_irql_range, ke_get_current_irql_stub)) {
+            std::println(stderr,
+                "[driver_loader] redirected privileged instruction at {:p} to KeGetCurrentIrql stub {:p}",
+                ep->ExceptionRecord->ExceptionAddress,
+                ke_get_current_irql_stub);
+            return EXCEPTION_CONTINUE_EXECUTION;
+        }
+    }
+    {
+        std::lock_guard<std::mutex> lock(s_dbghelp_mu);
+        if (s_dbghelp_initialized && g_active_entry_loader != nullptr) {
+            print_dbghelp_stack_trace(ep);
+        }
+    }
+#endif
+    const EXCEPTION_RECORD* er = ep->ExceptionRecord;
+    ULONG_PTR access_type = 0;
+    ULONG_PTR access_addr = 0;
+    if (er->ExceptionCode == EXCEPTION_ACCESS_VIOLATION &&
+        er->NumberParameters >= 2) {
+        access_type = er->ExceptionInformation[0];
+        access_addr = er->ExceptionInformation[1];
+    }
+    std::println(stderr,
+        "[driver_loader] SEH: code=0x{:08X} addr={:p} flags=0x{:08X} "
+        "access_type={} access_addr={:p}",
+        static_cast<unsigned long>(er->ExceptionCode),
+        er->ExceptionAddress,
+        static_cast<unsigned long>(er->ExceptionFlags),
+        static_cast<unsigned long long>(access_type),
+        reinterpret_cast<void*>(access_addr));
+    return EXCEPTION_CONTINUE_SEARCH;
+}
 
 struct NextSymbolSearch {
     DWORD64 start;
@@ -1138,6 +1129,16 @@ bool DriverLoader::GetDebugSymbolRange(const std::string& name,
     start = static_cast<std::uintptr_t>(symbol_start);
     end_exclusive = static_cast<std::uintptr_t>(symbol_end_exclusive);
     return true;
+}
+
+std::optional<std::pair<std::uintptr_t, std::uintptr_t>>
+DriverLoader::TryGetDebugSymbolRange(const std::string& name) const {
+    std::uintptr_t start = 0;
+    std::uintptr_t end_exclusive = 0;
+    if (!GetDebugSymbolRange(name, start, end_exclusive)) {
+        return std::nullopt;
+    }
+    return std::make_pair(start, end_exclusive);
 }
 
 std::wstring DriverLoader::BuildDefaultRegistryPath() const {

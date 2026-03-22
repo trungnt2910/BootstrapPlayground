@@ -142,6 +142,8 @@ public:
     [[nodiscard]] bool GetDebugSymbolRange(const std::string& name,
                                            std::uintptr_t& start,
                                            std::uintptr_t& end_exclusive) const;
+    [[nodiscard]] std::optional<std::pair<std::uintptr_t, std::uintptr_t>>
+    TryGetDebugSymbolRange(const std::string& name) const;
 
     template<typename T>
     [[nodiscard]] T* GetDebugSymbol(const std::string& name) const {
