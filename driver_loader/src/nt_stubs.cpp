@@ -27,6 +27,7 @@
 #include <iostream>
 #include <print>
 #include <string>
+#include <utility>
 
 // ---------------------------------------------------------------------------
 // Shared stub state
@@ -34,7 +35,7 @@
 
 namespace nt_stubs_internal {
 
-std::array<const char*, static_cast<std::size_t>(kStubSlotCount)> name_table = {};
+std::array<const char*, 256> name_table = {};
 int next_index = 0;
 
 [[noreturn]] static void report_and_abort(const char* msg) noexcept {
@@ -53,7 +54,7 @@ int next_index = 0;
 
 [[noreturn]] void handle_call(int idx) noexcept {
     const char* name =
-        (idx >= 0 && idx < kStubSlotCount && name_table[static_cast<std::size_t>(idx)])
+        (idx >= 0 && idx < 256 && name_table[static_cast<std::size_t>(idx)])
         ? name_table[static_cast<std::size_t>(idx)]
         : "<unknown>";
     {
@@ -73,27 +74,26 @@ int next_index = 0;
 } // namespace nt_stubs_internal
 
 // ---------------------------------------------------------------------------
-// Fallback stub – used when all generated stub slots are exhausted.
+// Fallback stub – used when all 256 numbered slots are exhausted.
 // ---------------------------------------------------------------------------
 
 static void* fallback_stub() noexcept {
     nt_stubs_internal::report_and_abort(
-        "[nt_stubs] An ntoskrnl stub was called but all generated stub slots are "
+        "[nt_stubs] An ntoskrnl stub was called but all 256 stub slots are "
         "exhausted.\n");
 }
 
 // ---------------------------------------------------------------------------
 // Public helper: allocate a numbered stub slot for 'name'.
 // Returns the stub function pointer, or the fallback stub pointer if all
-// all slots are taken.
+// 256 slots are taken.
 // ---------------------------------------------------------------------------
 
 void* nt_stubs_allocate(const char* name) noexcept {
     using namespace nt_stubs_internal;
-    if (next_index >= kStubSlotCount) {
+    if (next_index >= 256) {
         std::println(stderr,
-            "[nt_stubs] Warning: more than {} stubs requested; '{}' will use the fallback stub.",
-            kStubSlotCount,
+            "[nt_stubs] Warning: more than 256 stubs requested; '{}' will use the fallback stub.",
             name ? name : "<null>");
         return reinterpret_cast<void*>(&fallback_stub);
     }

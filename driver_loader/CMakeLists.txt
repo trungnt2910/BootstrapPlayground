@@ -1,12 +1,10 @@
 cmake_minimum_required(VERSION 3.24)
 
 # ---------------------------------------------------------------------------
-# Generate the numbered stubs at configure time.
+# Generate the 256 numbered stubs at configure time.
 # ---------------------------------------------------------------------------
 
-# Keep this in sync with current client-driver demand observed in logs/imports.
-# Current target is 0x1BC (444) based on the client driver expectation.
-set(STUB_SLOT_COUNT 444)
+set(STUB_SLOT_COUNT 256)
 
 set(GENERATED_STUBS "${CMAKE_CURRENT_BINARY_DIR}/nt_stubs_generated.cpp")
 

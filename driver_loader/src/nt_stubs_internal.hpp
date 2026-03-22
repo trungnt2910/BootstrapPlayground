@@ -11,10 +11,9 @@ namespace nt_stubs_internal {
 
 // Function pointer type for the generated stubs.
 using stub_fn_t = void* (*)() noexcept;
-inline constexpr int kStubSlotCount = 0x1BC;
 
 // Per-stub name storage (populated at load time by DriverLoader).
-extern std::array<const char*, static_cast<std::size_t>(kStubSlotCount)> name_table;
+extern std::array<const char*, 256> name_table;
 
 // Next available stub index.
 extern int next_index;

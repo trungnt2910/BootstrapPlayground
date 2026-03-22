@@ -1,25 +1,21 @@
 // ---- Wdf* -------------------------------------------------------------------
 
-static VOID NTAPI impl_WdfStubTableEntry0() {
-    std::println(stderr, "[nt_stubs] call {}", __func__);
+template<std::size_t Index>
+static VOID impl_WdfStubTableEntry() {
+    std::println(stderr, "[nt_stubs] call impl_WdfStubTableEntry{}", Index);
     std::flush(std::cerr);
 }
 
-static VOID NTAPI impl_WdfStubTableEntry1() {
-    std::println(stderr, "[nt_stubs] call {}", __func__);
-    std::flush(std::cerr);
+template<std::size_t... Indices>
+static auto MakeWdfFunctionTable(std::index_sequence<Indices...>) {
+    return std::array<WDFFUNC, sizeof...(Indices)>{
+        &impl_WdfStubTableEntry<Indices>...
+    };
 }
 
-static VOID NTAPI impl_WdfStubTableEntry2() {
-    std::println(stderr, "[nt_stubs] call {}", __func__);
-    std::flush(std::cerr);
-}
-
-static WDFFUNC s_wdf_function_table_stub[] = {
-    impl_WdfStubTableEntry0,
-    impl_WdfStubTableEntry1,
-    impl_WdfStubTableEntry2,
-};
+static constexpr ULONG kWdfFunctionTableStubCount = 0x1BC;
+static auto s_wdf_function_table_stub =
+    MakeWdfFunctionTable(std::make_index_sequence<kWdfFunctionTableStubCount>{});
 
 static NTSTATUS NTAPI impl_WdfVersionBind(PDRIVER_OBJECT driverObject,
                         PUNICODE_STRING /*registryPath*/, PWDF_BIND_INFO bindInfo,
@@ -38,10 +34,10 @@ static NTSTATUS NTAPI impl_WdfVersionBind(PDRIVER_OBJECT driverObject,
         return STATUS_INVALID_PARAMETER;
     }
 
-    bindInfo->FuncCount = static_cast<ULONG>(std::size(s_wdf_function_table_stub));
+    bindInfo->FuncCount = kWdfFunctionTableStubCount;
     bindInfo->Module = driverObject;
     if (bindInfo->FuncTable == nullptr) {
-        bindInfo->FuncTable = s_wdf_function_table_stub;
+        bindInfo->FuncTable = s_wdf_function_table_stub.data();
     }
 
     auto& driver_globals = loader->WdfDriverGlobals();
