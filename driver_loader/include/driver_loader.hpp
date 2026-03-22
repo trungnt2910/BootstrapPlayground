@@ -158,6 +158,7 @@ private:
     void MapSections  (const std::byte* file_data, std::size_t file_size);
     void ApplyRelocations();
     void ResolveImports(const std::byte* file_data);
+    void InitializeSecurityCookieFromLoadConfig();
     [[nodiscard]] std::wstring BuildDefaultRegistryPath() const;
     [[nodiscard]] static std::wstring DeriveDriverNameFromPath(std::string_view path);
 

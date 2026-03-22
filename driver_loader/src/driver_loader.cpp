@@ -30,6 +30,7 @@ void* nt_stubs_lookup(const char* name) noexcept;
 // ---------------------------------------------------------------------------
 #include <windows.h>
 #include <dbghelp.h>
+#include <bcrypt.h>
 
 // ---------------------------------------------------------------------------
 // ARM / ARM64 relocation types that may be absent from older MinGW headers.
@@ -243,6 +244,12 @@ void DriverLoader::Load() {
     // ---- Resolve imports ------------------------------------------------
     ResolveImports(file_data);
 
+    // ---- Initialize /GS security cookie --------------------------------
+    // Some drivers (e.g. KMDF-linked) call __security_init_cookie during
+    // early entry and fast-fail if the cookie still equals the default
+    // placeholder. Initialize it from IMAGE_LOAD_CONFIG_DIRECTORY.
+    InitializeSecurityCookieFromLoadConfig();
+
     // ---- Set per-section memory protections ----------------------------
     const auto* nth_mapped =
         reinterpret_cast<const IMAGE_NT_HEADERS*>(
@@ -261,6 +268,113 @@ void DriverLoader::Load() {
 
     // Flush CPU instruction cache so newly mapped code is visible.
     FlushInstructionCache(GetCurrentProcess(), m_base, m_image_size);
+}
+
+void DriverLoader::InitializeSecurityCookieFromLoadConfig() {
+    const auto* dos =
+        static_cast<const IMAGE_DOS_HEADER*>(m_base);
+    const auto* nth =
+        reinterpret_cast<const IMAGE_NT_HEADERS*>(
+            static_cast<const char*>(m_base) + dos->e_lfanew);
+
+    const IMAGE_DATA_DIRECTORY* loadcfg_dir =
+        get_data_dir(m_base, IMAGE_DIRECTORY_ENTRY_LOAD_CONFIG);
+    if (!loadcfg_dir || loadcfg_dir->Size == 0) {
+        return;
+    }
+
+#if defined(_WIN64)
+    constexpr std::size_t kLoadConfigMinSize = sizeof(IMAGE_LOAD_CONFIG_DIRECTORY64);
+#else
+    constexpr std::size_t kLoadConfigMinSize = sizeof(IMAGE_LOAD_CONFIG_DIRECTORY32);
+#endif
+    if (loadcfg_dir->Size < kLoadConfigMinSize) {
+        return;
+    }
+
+#if defined(_WIN64)
+    const auto* loadcfg = static_cast<const IMAGE_LOAD_CONFIG_DIRECTORY64*>(
+        rva_to_ptr(m_base, loadcfg_dir->VirtualAddress));
+    const std::uint64_t cookie_va = loadcfg->SecurityCookie;
+#else
+    const auto* loadcfg = static_cast<const IMAGE_LOAD_CONFIG_DIRECTORY32*>(
+        rva_to_ptr(m_base, loadcfg_dir->VirtualAddress));
+    const std::uint32_t cookie_va = loadcfg->SecurityCookie;
+#endif
+    if (cookie_va == 0) {
+        return;
+    }
+
+    const std::uintptr_t image_start = reinterpret_cast<std::uintptr_t>(m_base);
+    const std::size_t image_size = nth->OptionalHeader.SizeOfImage;
+    const std::uintptr_t cookie_addr = static_cast<std::uintptr_t>(cookie_va);
+    if (image_size < sizeof(std::uintptr_t) || cookie_addr < image_start) {
+        return;
+    }
+    if ((cookie_addr - image_start) > (image_size - sizeof(std::uintptr_t))) {
+        return;
+    }
+    if ((cookie_addr % alignof(std::uintptr_t)) != 0) {
+        return;
+    }
+
+    auto* cookie_ptr = reinterpret_cast<std::uintptr_t*>(cookie_addr);
+
+#if defined(_WIN64)
+    // MSVC/GS default placeholder cookie on 64-bit targets.
+    constexpr std::uintptr_t kDefaultCookie = 0x00002B992DDFA232ULL;
+    constexpr std::uintptr_t kCookieHighMask = 0xFFFF000000000000ULL;
+    constexpr std::uintptr_t kFallbackCookieXorMask = 0x4711A55A3C6DEB1FULL;
+#else
+    // MSVC/GS default placeholder cookie on 32-bit targets.
+    constexpr std::uintptr_t kDefaultCookie = 0xBB40E64EU;
+    constexpr std::uintptr_t kFallbackCookieXorMask = 0xA55A4711U;
+#endif
+    std::uint64_t seed = 0;
+    if (BCryptGenRandom(nullptr,
+                        reinterpret_cast<PUCHAR>(&seed),
+                        static_cast<ULONG>(sizeof(seed)),
+                        BCRYPT_USE_SYSTEM_PREFERRED_RNG) != STATUS_SUCCESS) {
+        seed = 0;
+    }
+    seed ^= static_cast<std::uint64_t>(GetCurrentProcessId()) << 16;
+    seed ^= static_cast<std::uint64_t>(GetCurrentThreadId());
+    seed ^= static_cast<std::uint64_t>(GetTickCount64());
+    seed ^= reinterpret_cast<std::uintptr_t>(m_base);
+    seed ^= reinterpret_cast<std::uintptr_t>(&seed);
+    seed ^= static_cast<std::uint64_t>(nth->OptionalHeader.AddressOfEntryPoint);
+    LARGE_INTEGER qpc = {};
+    if (QueryPerformanceCounter(&qpc) != 0) {
+        seed ^= static_cast<std::uint64_t>(qpc.QuadPart);
+    } else {
+        // Mix in FILETIME entropy if high-resolution performance counter
+        // sampling is unavailable.
+        FILETIME ft = {};
+        GetSystemTimeAsFileTime(&ft);
+        const std::uint64_t filetime_ticks =
+            (static_cast<std::uint64_t>(ft.dwHighDateTime) << 32) |
+            static_cast<std::uint64_t>(ft.dwLowDateTime);
+        seed ^= reinterpret_cast<std::uintptr_t>(cookie_ptr);
+        seed ^= filetime_ticks;
+    }
+
+    const auto normalize_cookie = [](std::uintptr_t value) -> std::uintptr_t {
+#if defined(_WIN64)
+        return (value & ~kCookieHighMask);
+#else
+        return value;
+#endif
+    };
+
+    std::uintptr_t cookie = normalize_cookie(static_cast<std::uintptr_t>(seed));
+    if (cookie == 0 || cookie == kDefaultCookie) {
+        cookie = normalize_cookie(cookie ^ kFallbackCookieXorMask);
+        if (cookie == 0 || cookie == kDefaultCookie) {
+            cookie += 1;
+        }
+    }
+
+    *cookie_ptr = cookie;
 }
 
 void DriverLoader::LoadPdb(std::string pdb_path) {
