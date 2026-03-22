@@ -679,7 +679,7 @@ NTSTATUS DriverLoader::CallDriverEntry(
 // GetExport  (by name)
 // ---------------------------------------------------------------------------
 
-void* DriverLoader::GetExport(std::string_view name) const {
+void* DriverLoader::GetExport(const std::string& name) const {
     if (!m_base) return nullptr;
 
     const IMAGE_DATA_DIRECTORY* export_dir =
@@ -742,16 +742,15 @@ void* DriverLoader::GetExport(std::uint16_t ordinal) const {
     return rva_to_ptr(m_base, rva);
 }
 
-void* DriverLoader::GetDebugSymbol(std::string_view name) const {
+void* DriverLoader::GetDebugSymbol(const std::string& name) const {
     if (!m_dbghelp_attached || m_dbghelp_module_base == 0 || name.empty()) {
         return nullptr;
     }
 
-    std::string symbol_name(name);
     SYMBOL_INFO_PACKAGE sip = {};
     sip.si.SizeOfStruct = sizeof(SYMBOL_INFO);
     sip.si.MaxNameLen = MAX_SYM_NAME;
-    if (!SymFromName(GetCurrentProcess(), symbol_name.c_str(), &sip.si)) {
+    if (!SymFromName(GetCurrentProcess(), name.c_str(), &sip.si)) {
         return nullptr;
     }
     return reinterpret_cast<void*>(sip.si.Address);

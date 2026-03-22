@@ -12,7 +12,6 @@
 #include <memory>
 #include <optional>
 #include <string>
-#include <string_view>
 #include <type_traits>
 #include <unordered_map>
 
@@ -115,13 +114,13 @@ public:
 
     // Find an exported symbol by name.  Returns nullptr if not found.
     // Requires: IsLoaded() == true.
-    [[nodiscard]] void* GetExport(std::string_view name)  const;
+    [[nodiscard]] void* GetExport(const std::string& name)  const;
 
     // Find an exported symbol by ordinal.  Returns nullptr if not found.
     [[nodiscard]] void* GetExport(std::uint16_t ordinal)  const;
 
     template<typename T>
-    [[nodiscard]] T* GetExport(std::string_view name) const {
+    [[nodiscard]] T* GetExport(const std::string& name) const {
         static_assert(!std::is_void_v<T>);
         return reinterpret_cast<T*>(GetExport(name));
     }
@@ -134,10 +133,10 @@ public:
 
     // Find a loaded debug symbol by name from DbgHelp.
     // Returns nullptr if symbols are not loaded or the symbol is not found.
-    [[nodiscard]] void* GetDebugSymbol(std::string_view name) const;
+    [[nodiscard]] void* GetDebugSymbol(const std::string& name) const;
 
     template<typename T>
-    [[nodiscard]] T* GetDebugSymbol(std::string_view name) const {
+    [[nodiscard]] T* GetDebugSymbol(const std::string& name) const {
         static_assert(!std::is_void_v<T>);
         return reinterpret_cast<T*>(GetDebugSymbol(name));
     }
