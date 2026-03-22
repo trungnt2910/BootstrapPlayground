@@ -141,6 +141,8 @@ public:
         return reinterpret_cast<T*>(GetDebugSymbol(name));
     }
 
+    [[nodiscard]] void* GetBase() const noexcept { return m_base; }
+
 private:
     // ------------------------------------------------------------------
     // Internal helpers

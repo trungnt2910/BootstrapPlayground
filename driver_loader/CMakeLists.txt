@@ -57,4 +57,4 @@ target_include_directories(driver_loader
 # These are already available via the MinGW sysroot import libraries.
 target_link_libraries(driver_loader PUBLIC kernel32 dbghelp bcrypt)
 
-target_compile_options(driver_loader PRIVATE -gcodeview)
+target_compile_options(driver_loader PRIVATE -gcodeview -O0)

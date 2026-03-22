@@ -22,5 +22,5 @@ foreach(driver ${DRIVER_FILES})
     )
 endforeach()
 
-target_compile_options(test_host PRIVATE -gcodeview)
+target_compile_options(test_host PRIVATE -gcodeview -O0)
 target_link_options(test_host PRIVATE -Wl,--pdb=)

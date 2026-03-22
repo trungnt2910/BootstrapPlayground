@@ -120,7 +120,7 @@ int main(int argc, char* argv[]) {
                          reinterpret_cast<void*>(&LxInitialize));
 
         loader.Load();
-        std::println(stderr, "[test_host] Driver mapped successfully.");
+        std::println(stderr, "[test_host] Driver loaded at {}.", loader.GetBase());
 
         const NTSTATUS status = loader.CallDriverEntry(std::nullopt);
 
