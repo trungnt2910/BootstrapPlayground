@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <format>
@@ -56,8 +57,68 @@ static NTSTATUS NTAPI default_dispatch_fn(DEVICE_OBJECT* /*dev*/,
     return STATUS_NOT_SUPPORTED;
 }
 
+#if defined(_M_X64) || defined(__x86_64__)
+namespace {
+thread_local std::uint8_t g_emulated_irql = 0; // PASSIVE_LEVEL
+
+static ULONG64* context_gpr_by_rm(CONTEXT* ctx, std::uint8_t rm) noexcept {
+    switch (rm & 0x07U) {
+        case 0: return &ctx->Rax;
+        case 1: return &ctx->Rcx;
+        case 2: return &ctx->Rdx;
+        case 3: return &ctx->Rbx;
+        case 4: return &ctx->Rsp;
+        case 5: return &ctx->Rbp;
+        case 6: return &ctx->Rsi;
+        case 7: return &ctx->Rdi;
+        default: return nullptr;
+    }
+}
+
+static bool emulate_privileged_instruction(EXCEPTION_POINTERS* ep) noexcept {
+    if (!ep || !ep->ExceptionRecord || !ep->ContextRecord) return false;
+    if (ep->ExceptionRecord->ExceptionCode != EXCEPTION_PRIV_INSTRUCTION) return false;
+
+    const auto* ip = static_cast<const std::uint8_t*>(ep->ExceptionRecord->ExceptionAddress);
+    if (!ip) return false;
+
+    // Emulate x64 CR8 access emitted by KeGetCurrentIrql/KeRaiseIrql.
+    //   44 0F 20 Cx  => mov r64, cr8
+    //   44 0F 22 Cx  => mov cr8, r64
+    // where x encodes the target/source GPR.
+    if (ip[0] != 0x44 || ip[1] != 0x0F || (ip[2] != 0x20 && ip[2] != 0x22)) {
+        return false;
+    }
+
+    const std::uint8_t modrm = ip[3];
+    if ((modrm & 0xC0U) != 0xC0U) return false;                // mod must be register-direct
+    if (((modrm >> 3U) & 0x07U) != 0x00U) return false;        // control register index 0 + REX.R => CR8
+
+    CONTEXT* const ctx = ep->ContextRecord;
+    ULONG64* const gpr = context_gpr_by_rm(ctx, modrm & 0x07U);
+    if (!gpr) return false;
+
+    if (ip[2] == 0x20) {
+        *gpr = g_emulated_irql;
+    } else {
+        g_emulated_irql = static_cast<std::uint8_t>(*gpr & 0xFFU);
+    }
+    ctx->Rip += 4;
+    std::println(stderr,
+        "[driver_loader] emulated privileged CR8 instruction at {:p}",
+        ep->ExceptionRecord->ExceptionAddress);
+    return true;
+}
+} // namespace
+#endif
+
 static LONG WINAPI entry_exception_diagnostics(EXCEPTION_POINTERS* ep) {
     if (!ep || !ep->ExceptionRecord) return EXCEPTION_CONTINUE_SEARCH;
+#if defined(_M_X64) || defined(__x86_64__)
+    if (emulate_privileged_instruction(ep)) {
+        return EXCEPTION_CONTINUE_EXECUTION;
+    }
+#endif
     const EXCEPTION_RECORD* er = ep->ExceptionRecord;
     ULONG_PTR access_type = 0;
     ULONG_PTR access_addr = 0;
