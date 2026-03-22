@@ -1,4 +1,4 @@
-// ---- Cng* -------------------------------------------------------------------
+// ---- BCrypt* ----------------------------------------------------------------
 
 static NTSTATUS NTAPI impl_BCryptGenRandom(PVOID /*alg*/, UCHAR* buf,
                                             ULONG len, ULONG /*flags*/) {

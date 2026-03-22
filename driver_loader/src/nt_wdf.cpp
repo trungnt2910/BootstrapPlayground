@@ -1,5 +1,7 @@
 // ---- Wdf* -------------------------------------------------------------------
 
+static UCHAR s_wdf_function_table_stub[1024] = {};
+
 struct WDF_BIND_INFO_STUB {
     ULONG Size;
     ULONG Component;
@@ -29,7 +31,7 @@ static NTSTATUS NTAPI impl_WdfVersionBind(PVOID driverObject,
     }
     auto* info = static_cast<WDF_BIND_INFO_STUB*>(bindInfo);
     if (info->Size >= sizeof(WDF_BIND_INFO_STUB)) {
-        info->FuncTable = s_wdf_globals_buf;
+        info->FuncTable = s_wdf_function_table_stub;
     }
     s_wdf_component_globals.Driver = driverObject;
     *componentGlobals = &s_wdf_component_globals;
