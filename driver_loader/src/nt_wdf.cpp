@@ -1,7 +1,7 @@
 // ---- Wdf* -------------------------------------------------------------------
 
 template<std::size_t Index>
-static VOID impl_WdfStubTableEntry() {
+static VOID NTAPI impl_WdfStubTableEntry() {
     std::println(stderr, "[nt_stubs] call impl_WdfStubTableEntry{}", Index);
     std::flush(std::cerr);
 }
