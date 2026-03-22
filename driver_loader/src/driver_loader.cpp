@@ -283,8 +283,10 @@ void DriverLoader::InitializeSecurityCookie() {
         return;
     }
 
-    constexpr std::size_t kLoadConfigMinSize = sizeof(IMAGE_LOAD_CONFIG_DIRECTORY);
-    if (loadcfg_dir->Size < kLoadConfigMinSize) {
+    constexpr std::size_t kSecurityCookieFieldEnd =
+        offsetof(IMAGE_LOAD_CONFIG_DIRECTORY, SecurityCookie) +
+        sizeof(decltype(IMAGE_LOAD_CONFIG_DIRECTORY::SecurityCookie));
+    if (loadcfg_dir->Size < kSecurityCookieFieldEnd) {
         return;
     }
 

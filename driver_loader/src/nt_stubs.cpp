@@ -616,7 +616,16 @@ void* nt_stubs_lookup_ntoskrnl(const char* name) noexcept {
 
 // Stub implementations are grouped by family for maintainability.
 #include "nt_dbg.cpp"
+#include "nt_ex.cpp"
+#include "nt_ke.cpp"
+#include "nt_mm.cpp"
 #include "nt_rtl.cpp"
 #include "nt_ob.cpp"
 #include "nt_io.cpp"
+#include "nt_ps.cpp"
+#include "nt_zw.cpp"
+#include "nt_etw.cpp"
+#include "nt_wdf.cpp"
+#include "nt_cng.cpp"
+#include "nt_crt.cpp"
 #include "nt_misc.cpp"
