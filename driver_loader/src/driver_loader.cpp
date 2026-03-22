@@ -69,7 +69,7 @@ struct NextSymbolSearch {
 static BOOL CALLBACK find_next_symbol_cb(PSYMBOL_INFO symbol_info,
                                          ULONG /*symbol_size*/,
                                          PVOID user_context) {
-    if (!symbol_info || !user_context) return TRUE;
+    if (!symbol_info || !user_context) return FALSE;
     auto* search = static_cast<NextSymbolSearch*>(user_context);
     if (symbol_info->Address > search->start &&
         (search->next == 0 || symbol_info->Address < search->next)) {
@@ -90,17 +90,17 @@ static bool resolve_kegetcurrentirql_range_from_pdb(
     if (!sym) return false;
 
     const DWORD64 start = static_cast<DWORD64>(reinterpret_cast<std::uintptr_t>(sym));
-    if (start == 0) return false;
 
     const HANDLE process = GetCurrentProcess();
     DWORD64 end_exclusive = 0;
 
-    SYMBOL_INFO_PACKAGE sip = {};
-    sip.si.SizeOfStruct = sizeof(SYMBOL_INFO);
-    sip.si.MaxNameLen = MAX_SYM_NAME;
+    SYMBOL_INFO_PACKAGE symbol_info_pkg = {};
+    symbol_info_pkg.si.SizeOfStruct = sizeof(SYMBOL_INFO);
+    symbol_info_pkg.si.MaxNameLen = MAX_SYM_NAME;
     DWORD64 displacement = 0;
-    if (SymFromAddr(process, start, &displacement, &sip.si) && sip.si.Size > 0) {
-        end_exclusive = start + sip.si.Size;
+    if (SymFromAddr(process, start, &displacement, &symbol_info_pkg.si) &&
+        symbol_info_pkg.si.Size > 0) {
+        end_exclusive = start + symbol_info_pkg.si.Size;
     }
 
     if (end_exclusive <= start) {
