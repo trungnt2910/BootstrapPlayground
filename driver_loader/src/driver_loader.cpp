@@ -18,6 +18,7 @@
 #include <print>
 #include <stdexcept>
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -132,6 +133,9 @@ bool              s_dbghelp_initialized = false;
 
 } // anonymous namespace
 
+std::unordered_map<const DRIVER_OBJECT*, DriverLoader*> DriverLoader::s_driver_object_map = {};
+std::mutex DriverLoader::s_driver_object_map_mutex;
+
 // ---------------------------------------------------------------------------
 // DriverLoader constructor / destructor
 // ---------------------------------------------------------------------------
@@ -146,6 +150,10 @@ DriverLoader::DriverLoader(std::string path)
 }
 
 DriverLoader::~DriverLoader() {
+    {
+        std::lock_guard<std::mutex> lock(s_driver_object_map_mutex);
+        s_driver_object_map.erase(&m_driver_object);
+    }
     {
         std::lock_guard<std::mutex> lock(s_dbghelp_mu);
         if (m_dbghelp_attached) {
@@ -746,6 +754,22 @@ NTSTATUS DriverLoader::CallDriverEntry(
     for (auto& fn : m_driver_object.MajorFunction)
         fn = default_dispatch_fn;
 
+    m_wdf_driver_globals = {};
+    m_wdf_driver_globals.Driver = &m_driver_object;
+    m_wdf_driver_globals.DriverTag =
+        (static_cast<ULONG>('W') << 16) |
+        (static_cast<ULONG>('D') << 8)  |
+        static_cast<ULONG>('F');
+    std::snprintf(m_wdf_driver_globals.DriverName, WDF_DRIVER_GLOBALS_NAME_LEN,
+        "%ls", m_driver_name.c_str());
+    m_wdf_component_globals = {};
+    m_wdf_component_globals.Size = sizeof(WDF_COMPONENT_GLOBALS);
+    m_wdf_component_globals.DriverGlobals = &m_wdf_driver_globals;
+    {
+        std::lock_guard<std::mutex> lock(s_driver_object_map_mutex);
+        s_driver_object_map[&m_driver_object] = this;
+    }
+
     // ---- Initialize registry path UNICODE_STRING ------------------------
     if (registry_path.has_value()) {
         m_registry_path_buf = *registry_path;
@@ -914,4 +938,12 @@ void DriverLoader::SetDriverName(std::wstring name) {
         throw std::runtime_error("Driver name must not be empty");
     }
     m_driver_name = std::move(name);
+}
+
+DriverLoader* DriverLoader::FromDriverObject(const DRIVER_OBJECT* driver_object) noexcept {
+    if (!driver_object) return nullptr;
+    std::lock_guard<std::mutex> lock(s_driver_object_map_mutex);
+    const auto it = s_driver_object_map.find(driver_object);
+    if (it == s_driver_object_map.end()) return nullptr;
+    return it->second;
 }

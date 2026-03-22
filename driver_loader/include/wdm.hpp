@@ -34,6 +34,7 @@ typedef unsigned long       ULONG;
 typedef unsigned short      USHORT;
 typedef short               SHORT;
 typedef unsigned char       UCHAR;
+typedef char                CHAR;
 typedef wchar_t             WCHAR;
 typedef unsigned char       BOOLEAN;
 typedef long long           LONGLONG;

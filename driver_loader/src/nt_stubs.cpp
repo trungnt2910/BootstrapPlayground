@@ -10,8 +10,10 @@
 // <windows.h> must come before wdm.hpp to establish scalar type definitions.
 #include <windows.h>
 
+#include "../include/driver_loader.hpp"
 #include "nt_stubs_internal.hpp"
 #include "../include/wdm.hpp"
+#include "../include/wdf.hpp"
 
 #include <array>
 #include <cctype>
@@ -119,9 +121,6 @@ static EPROCESS     s_fake_eprocess          = {};
 static PEPROCESS    s_PsInitialSystemProcess = &s_fake_eprocess;
 static SE_EXPORTS   s_se_exports_buf         = {};
 static PSE_EXPORTS  s_SeExports              = &s_se_exports_buf;
-
-// Fake WDF component globals buffer (zeroed; used by WdfVersionBind stubs).
-static UCHAR        s_wdf_globals_buf[1024]  = {};
 
 // ---------------------------------------------------------------------------
 // Built-in symbol table
@@ -317,15 +316,17 @@ static LONG NTAPI impl_InterlockedCompareExchange(volatile LONG* dest,
                                                     LONG comparand);
 
 // ---- WDF (wdfldr.sys) ------------------------------------------------------
-static NTSTATUS NTAPI impl_WdfVersionBind(PVOID driverObject,
-                        PVOID registryPath, PVOID bindInfo,
-                        PVOID* componentGlobals);
+static NTSTATUS NTAPI impl_WdfVersionBind(PDRIVER_OBJECT driverObject,
+                        PUNICODE_STRING registryPath, PWDF_BIND_INFO bindInfo,
+                        PWDF_COMPONENT_GLOBALS* componentGlobals);
 static NTSTATUS NTAPI impl_WdfVersionBindClass(PVOID context,
-                        PVOID bindInfo, PVOID* componentGlobals);
-static VOID NTAPI impl_WdfVersionUnbind(PVOID registryPath, PVOID bindInfo,
-                                         PVOID componentGlobals);
-static VOID NTAPI impl_WdfVersionUnbindClass(PVOID context, PVOID bindInfo,
-                                               PVOID componentGlobals);
+                        PWDF_BIND_INFO bindInfo, PWDF_COMPONENT_GLOBALS* componentGlobals);
+static VOID NTAPI impl_WdfVersionUnbind(PUNICODE_STRING registryPath,
+                                         PWDF_BIND_INFO bindInfo,
+                                         PWDF_COMPONENT_GLOBALS componentGlobals);
+static VOID NTAPI impl_WdfVersionUnbindClass(PVOID context,
+                                               PWDF_BIND_INFO bindInfo,
+                                               PWDF_COMPONENT_GLOBALS componentGlobals);
 static NTSTATUS NTAPI impl_WdfLdrQueryInterface(PVOID iface);
 
 // ---- BCrypt (cng.sys) ------------------------------------------------------
