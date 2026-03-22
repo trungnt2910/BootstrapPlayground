@@ -16,9 +16,9 @@ static VOID NTAPI impl_WdfStubTableEntry2() {
 }
 
 static PVOID s_wdf_function_table_stub[] = {
-    reinterpret_cast<PVOID>(&impl_WdfStubTableEntry0),
-    reinterpret_cast<PVOID>(&impl_WdfStubTableEntry1),
-    reinterpret_cast<PVOID>(&impl_WdfStubTableEntry2),
+    &impl_WdfStubTableEntry0,
+    &impl_WdfStubTableEntry1,
+    &impl_WdfStubTableEntry2,
 };
 
 static NTSTATUS NTAPI impl_WdfVersionBind(PDRIVER_OBJECT driverObject,
@@ -48,12 +48,6 @@ static NTSTATUS NTAPI impl_WdfVersionBind(PDRIVER_OBJECT driverObject,
     auto& driver_globals = loader->WdfDriverGlobals();
     driver_globals.Driver = driverObject;
     driver_globals.DriverFlags = 0;
-    driver_globals.DriverTag =
-        (static_cast<ULONG>('W') << 16) |
-        (static_cast<ULONG>('D') << 8)  |
-        static_cast<ULONG>('F');
-    std::snprintf(driver_globals.DriverName,
-        WDF_DRIVER_GLOBALS_NAME_LEN, "%ls", loader->GetDriverName().c_str());
     driver_globals.DisplaceDriverUnload = 0;
 
     globals.Size = sizeof(WDF_COMPONENT_GLOBALS);

@@ -131,6 +131,32 @@ std::mutex        s_dbghelp_mu;
 std::atomic<int>  s_dbghelp_refcount{0};
 bool              s_dbghelp_initialized = false;
 
+constexpr ULONG kWdfDriverTag =
+    (static_cast<ULONG>('W') << 16) |
+    (static_cast<ULONG>('D') << 8)  |
+    static_cast<ULONG>('F');
+
+void CopyDriverNameToWdfGlobals(const std::wstring& source,
+                                CHAR (&dest)[WDF_DRIVER_GLOBALS_NAME_LEN]) {
+    std::memset(dest, 0, sizeof(dest));
+    if (source.empty()) {
+        return;
+    }
+
+    const int written = WideCharToMultiByte(
+        CP_UTF8, 0,
+        source.c_str(), -1,
+        dest, static_cast<int>(WDF_DRIVER_GLOBALS_NAME_LEN),
+        nullptr, nullptr);
+    if (written > 0) {
+        return;
+    }
+
+    const char* fallback = "driver";
+    std::strncpy(dest, fallback, WDF_DRIVER_GLOBALS_NAME_LEN - 1);
+    dest[WDF_DRIVER_GLOBALS_NAME_LEN - 1] = '\0';
+}
+
 } // anonymous namespace
 
 std::unordered_map<const DRIVER_OBJECT*, DriverLoader*> DriverLoader::s_driver_object_map = {};
@@ -756,12 +782,8 @@ NTSTATUS DriverLoader::CallDriverEntry(
 
     m_wdf_driver_globals = {};
     m_wdf_driver_globals.Driver = &m_driver_object;
-    m_wdf_driver_globals.DriverTag =
-        (static_cast<ULONG>('W') << 16) |
-        (static_cast<ULONG>('D') << 8)  |
-        static_cast<ULONG>('F');
-    std::snprintf(m_wdf_driver_globals.DriverName, WDF_DRIVER_GLOBALS_NAME_LEN,
-        "%ls", m_driver_name.c_str());
+    m_wdf_driver_globals.DriverTag = kWdfDriverTag;
+    CopyDriverNameToWdfGlobals(m_driver_name, m_wdf_driver_globals.DriverName);
     m_wdf_component_globals = {};
     m_wdf_component_globals.Size = sizeof(WDF_COMPONENT_GLOBALS);
     m_wdf_component_globals.DriverGlobals = &m_wdf_driver_globals;
