@@ -137,7 +137,8 @@ public:
     // Returns nullptr if symbols are not loaded or the symbol is not found.
     [[nodiscard]] void* GetDebugSymbol(const std::string& name) const;
     // Find a loaded debug symbol range [start, end) from DbgHelp.
-    // Returns false if symbols are not loaded or the symbol/range is unavailable.
+    // Returns true when a valid range is found. On failure, returns false and
+    // zeroes both output values.
     [[nodiscard]] bool GetDebugSymbolRange(const std::string& name,
                                            std::uintptr_t& start,
                                            std::uintptr_t& end_exclusive) const;

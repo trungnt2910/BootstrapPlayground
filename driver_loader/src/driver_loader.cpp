@@ -57,17 +57,17 @@ static NTSTATUS NTAPI default_dispatch_fn(DEVICE_OBJECT* /*dev*/,
     return STATUS_NOT_SUPPORTED;
 }
 
-namespace {
 #if defined(_M_X64) || defined(__x86_64__)
+namespace {
 thread_local DriverLoader* g_active_entry_loader = nullptr;
 
-static bool resolve_symbol_range_from_pdb(DriverLoader* loader,
-                                          const char* symbol_name,
-                                          std::uintptr_t& symbol_start,
-                                          std::uintptr_t& symbol_end_exclusive) noexcept {
+static bool resolve_symbol_range(DriverLoader* loader,
+                                 const char* symbol_name,
+                                 std::uintptr_t& symbol_start,
+                                 std::uintptr_t& symbol_end_exclusive) noexcept {
     symbol_start = 0;
     symbol_end_exclusive = 0;
-    if (!loader || !symbol_name || symbol_name[0] == '\0') return false;
+    if (!loader || !symbol_name) return false;
     return loader->GetDebugSymbolRange(symbol_name, symbol_start, symbol_end_exclusive);
 }
 
@@ -102,7 +102,6 @@ static bool route_kegetcurrentirql_to_stub(EXCEPTION_POINTERS* ep,
         ke_get_current_irql_stub);
     return true;
 }
-#endif
 
 static void print_dbghelp_stack_trace(EXCEPTION_POINTERS* ep) {
     if (!ep || !ep->ContextRecord) return;
@@ -188,11 +187,15 @@ static LONG WINAPI entry_exception_diagnostics(EXCEPTION_POINTERS* ep) {
 #if defined(_M_X64) || defined(__x86_64__)
     std::uintptr_t ke_get_current_irql_start = 0;
     std::uintptr_t ke_get_current_irql_end_exclusive = 0;
-    if (resolve_symbol_range_from_pdb(g_active_entry_loader,
-                                      "KeGetCurrentIrql",
-                                      ke_get_current_irql_start,
-                                      ke_get_current_irql_end_exclusive)) {
+    if (resolve_symbol_range(g_active_entry_loader,
+                             "KeGetCurrentIrql",
+                             ke_get_current_irql_start,
+                             ke_get_current_irql_end_exclusive)) {
         const void* ke_get_current_irql_stub = nt_stubs_lookup("KeGetCurrentIrql");
+        if (!ke_get_current_irql_stub) {
+            std::println(stderr,
+                "[driver_loader] failed to find KeGetCurrentIrql stub for privileged-instruction redirection");
+        }
         if (route_kegetcurrentirql_to_stub(ep,
                                            ke_get_current_irql_start,
                                            ke_get_current_irql_end_exclusive,
@@ -279,6 +282,23 @@ bool iequal(std::string_view a, std::string_view b) noexcept {
 std::mutex        s_dbghelp_mu;
 std::atomic<int>  s_dbghelp_refcount{0};
 bool              s_dbghelp_initialized = false;
+
+struct NextSymbolSearch {
+    DWORD64 start;
+    DWORD64 next;
+};
+
+static BOOL CALLBACK find_next_symbol_cb(PSYMBOL_INFO symbol_info,
+                                         ULONG /*symbol_size*/,
+                                         PVOID user_context) {
+    if (!symbol_info || !user_context) return FALSE;
+    auto* search = static_cast<NextSymbolSearch*>(user_context);
+    if (symbol_info->Address > search->start &&
+        (search->next == 0 || symbol_info->Address < search->next)) {
+        search->next = symbol_info->Address;
+    }
+    return TRUE;
+}
 
 constexpr ULONG kWdfDriverTag =
     (static_cast<ULONG>('W') << 16) |
@@ -1101,24 +1121,12 @@ bool DriverLoader::GetDebugSymbolRange(const std::string& name,
     if (sip.si.Size > 0) {
         symbol_end_exclusive = symbol_start + sip.si.Size;
     } else {
-        struct NextSymbolSearch {
-            DWORD64 start;
-            DWORD64 next;
-        } search{symbol_start, 0};
-        const auto enum_cb = [](PSYMBOL_INFO symbol_info,
-                                ULONG /*symbol_size*/,
-                                PVOID user_context) -> BOOL {
-            if (!symbol_info || !user_context) return FALSE;
-            auto* next_search = static_cast<NextSymbolSearch*>(user_context);
-            if (symbol_info->Address > next_search->start &&
-                (next_search->next == 0 || symbol_info->Address < next_search->next)) {
-                next_search->next = symbol_info->Address;
-            }
-            return TRUE;
-        };
+        NextSymbolSearch search{};
+        search.start = symbol_start;
+        search.next = 0;
         const DWORD64 module_base = SymGetModuleBase64(process, symbol_start);
         if (module_base != 0 &&
-            SymEnumSymbols(process, module_base, nullptr, enum_cb, &search) &&
+            SymEnumSymbols(process, module_base, nullptr, &find_next_symbol_cb, &search) &&
             search.next > symbol_start) {
             symbol_end_exclusive = search.next;
         }
