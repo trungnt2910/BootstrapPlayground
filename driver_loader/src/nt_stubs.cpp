@@ -44,7 +44,7 @@ int next_index = 0;
         const DWORD len = static_cast<DWORD>(std::strlen(msg));
         (void)WriteFile(h, msg, len, &written, nullptr);
     }
-    std::println(stderr, "{}", msg);
+    std::print(std::cerr, "{}", msg);
     std::flush(std::cerr);
     std::abort();
 }
@@ -56,14 +56,14 @@ int next_index = 0;
         : "<unknown>";
     {
         const std::string enter_buf = std::format(
-            "[nt_stubs] handle_call-enter #{} name={}\n", idx, name);
+            "[nt_stubs] handle_call-enter #{} name={}", idx, name);
         OutputDebugStringA(enter_buf.c_str());
-        std::println(stderr, "{}", enter_buf);
+        std::println(std::cerr, "{}", enter_buf);
         std::flush(std::cerr);
     }
     const std::string buf = std::format(
         "[nt_stubs] handle_call-exit  #{} result=<abort> reason=unimplemented symbol={}\n"
-        "[nt_stubs] Unimplemented ntoskrnl function called: {} (stub #{})\n",
+        "[nt_stubs] Unimplemented ntoskrnl function called: {} (stub #{})",
         idx, name, name, idx);
     report_and_abort(buf.c_str());
 }
@@ -579,7 +579,7 @@ void* nt_stubs_lookup(const char* name) noexcept {
                     "[nt_stubs] Warning: {} not found in ntdll/msvcrt; using fallback implementation.\n",
                     sn);
                 OutputDebugStringA(msg.c_str());
-                std::println(stderr, "{}", msg);
+                std::print(std::cerr, "{}", msg);
                 std::flush(std::cerr);
                 if (std::strcmp(sn, "__C_specific_handler") == 0)
                     return reinterpret_cast<void*>(&impl___C_specific_handler_fallback);

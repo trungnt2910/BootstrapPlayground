@@ -771,11 +771,35 @@ std::wstring DriverLoader::DeriveDriverNameFromPath(std::string_view path) {
     const std::string_view stem =
         (dot == std::string_view::npos) ? file : file.substr(0, dot);
 
-    std::wstring out;
-    out.reserve(stem.size());
-    for (unsigned char ch : stem) {
-        out.push_back(static_cast<wchar_t>(ch));
+    if (stem.empty()) {
+        return {};
     }
+
+    int required = MultiByteToWideChar(
+        CP_UTF8, MB_ERR_INVALID_CHARS,
+        stem.data(), static_cast<int>(stem.size()),
+        nullptr, 0);
+    if (required <= 0) {
+        required = MultiByteToWideChar(
+            CP_ACP, 0,
+            stem.data(), static_cast<int>(stem.size()),
+            nullptr, 0);
+        if (required <= 0) {
+            return {};
+        }
+        std::wstring out(static_cast<std::size_t>(required), L'\0');
+        (void)MultiByteToWideChar(
+            CP_ACP, 0,
+            stem.data(), static_cast<int>(stem.size()),
+            out.data(), required);
+        return out;
+    }
+
+    std::wstring out(static_cast<std::size_t>(required), L'\0');
+    (void)MultiByteToWideChar(
+        CP_UTF8, MB_ERR_INVALID_CHARS,
+        stem.data(), static_cast<int>(stem.size()),
+        out.data(), required);
     return out;
 }
 
