@@ -248,7 +248,7 @@ void DriverLoader::Load() {
     // Some drivers (e.g. KMDF-linked) call __security_init_cookie during
     // early entry and fast-fail if the cookie still equals the default
     // placeholder. Initialize it from IMAGE_LOAD_CONFIG_DIRECTORY.
-    InitializeSecurityCookieFromLoadConfig();
+    InitializeSecurityCookie();
 
     // ---- Set per-section memory protections ----------------------------
     const auto* nth_mapped =
@@ -270,7 +270,7 @@ void DriverLoader::Load() {
     FlushInstructionCache(GetCurrentProcess(), m_base, m_image_size);
 }
 
-void DriverLoader::InitializeSecurityCookieFromLoadConfig() {
+void DriverLoader::InitializeSecurityCookie() {
     const auto* dos =
         static_cast<const IMAGE_DOS_HEADER*>(m_base);
     const auto* nth =
@@ -283,24 +283,15 @@ void DriverLoader::InitializeSecurityCookieFromLoadConfig() {
         return;
     }
 
-#if defined(_WIN64)
-    constexpr std::size_t kLoadConfigMinSize = sizeof(IMAGE_LOAD_CONFIG_DIRECTORY64);
-#else
-    constexpr std::size_t kLoadConfigMinSize = sizeof(IMAGE_LOAD_CONFIG_DIRECTORY32);
-#endif
+    constexpr std::size_t kLoadConfigMinSize = sizeof(IMAGE_LOAD_CONFIG_DIRECTORY);
     if (loadcfg_dir->Size < kLoadConfigMinSize) {
         return;
     }
 
-#if defined(_WIN64)
-    const auto* loadcfg = static_cast<const IMAGE_LOAD_CONFIG_DIRECTORY64*>(
+    const auto* loadcfg = static_cast<const IMAGE_LOAD_CONFIG_DIRECTORY*>(
         rva_to_ptr(m_base, loadcfg_dir->VirtualAddress));
-    const std::uint64_t cookie_va = loadcfg->SecurityCookie;
-#else
-    const auto* loadcfg = static_cast<const IMAGE_LOAD_CONFIG_DIRECTORY32*>(
-        rva_to_ptr(m_base, loadcfg_dir->VirtualAddress));
-    const std::uint32_t cookie_va = loadcfg->SecurityCookie;
-#endif
+    const std::uintptr_t cookie_va =
+        static_cast<std::uintptr_t>(loadcfg->SecurityCookie);
     if (cookie_va == 0) {
         return;
     }
