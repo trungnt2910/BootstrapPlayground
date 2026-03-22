@@ -21,6 +21,7 @@ Makefile
 *.a
 *.so
 *.pdb
+!drivers/*.pdb
 
 # Ninja build files
 .ninja_deps

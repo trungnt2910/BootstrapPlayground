@@ -50,12 +50,16 @@ static LONG WINAPI top_level_exception_filter(EXCEPTION_POINTERS* ep) {
 // Select the architecture-appropriate lxmonika driver filename.
 #if defined(__x86_64__) || defined(_M_AMD64)
 #  define LXMONIKA_SYS "lxmonika_x64.sys"
+#  define LXMONIKA_PDB "lxmonika_x64.pdb"
 #elif defined(__i386__) || defined(_M_IX86)
 #  define LXMONIKA_SYS "lxmonika_x86.sys"
+#  define LXMONIKA_PDB "lxmonika_x86.pdb"
 #elif defined(__aarch64__) || defined(_M_ARM64)
 #  define LXMONIKA_SYS "lxmonika_arm64.sys"
+#  define LXMONIKA_PDB "lxmonika_arm64.pdb"
 #elif defined(__arm__) || defined(_M_ARM)
 #  define LXMONIKA_SYS "lxmonika_arm.sys"
+#  define LXMONIKA_PDB "lxmonika_arm.pdb"
 #else
 #  error "Unknown target architecture – cannot select lxmonika driver"
 #endif
@@ -121,6 +125,8 @@ int main(int argc, char* argv[]) {
 
         loader.Load();
         std::println(stderr, "[test_host] Driver loaded at {}.", loader.GetBase());
+        loader.LoadPdb(LXMONIKA_PDB);
+        std::println(stderr, "[test_host] Loaded PDB: {}", LXMONIKA_PDB);
 
         const NTSTATUS status = loader.CallDriverEntry(std::nullopt);
 

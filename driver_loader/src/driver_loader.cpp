@@ -60,6 +60,7 @@ static NTSTATUS NTAPI default_dispatch_fn(DEVICE_OBJECT* /*dev*/,
 #if defined(_M_X64) || defined(__x86_64__)
 namespace {
 thread_local std::uint8_t g_emulated_irql = 0; // PASSIVE_LEVEL
+thread_local DriverLoader* g_active_entry_loader = nullptr;
 
 static ULONG64* context_gpr_by_rm(CONTEXT* ctx, std::uint8_t rm) noexcept {
     switch (rm & 0x07U) {
@@ -75,18 +76,16 @@ static ULONG64* context_gpr_by_rm(CONTEXT* ctx, std::uint8_t rm) noexcept {
     }
 }
 
-static bool emulate_privileged_instruction(EXCEPTION_POINTERS* ep) noexcept {
+static bool route_kegetcurrentirql_to_stub(EXCEPTION_POINTERS* ep) noexcept {
     if (!ep || !ep->ExceptionRecord || !ep->ContextRecord) return false;
     if (ep->ExceptionRecord->ExceptionCode != EXCEPTION_PRIV_INSTRUCTION) return false;
 
     const auto* ip = static_cast<const std::uint8_t*>(ep->ExceptionRecord->ExceptionAddress);
     if (!ip) return false;
 
-    // Emulate x64 CR8 access emitted by KeGetCurrentIrql/KeRaiseIrql.
+    // Route x64 CR8 reads emitted by KeGetCurrentIrql to the named stub:
     //   44 0F 20 Cx  => mov r64, cr8
-    //   44 0F 22 Cx  => mov cr8, r64
-    // where x encodes the target/source GPR.
-    if (ip[0] != 0x44 || ip[1] != 0x0F || (ip[2] != 0x20 && ip[2] != 0x22)) {
+    if (ip[0] != 0x44 || ip[1] != 0x0F || ip[2] != 0x20) {
         return false;
     }
 
@@ -98,16 +97,124 @@ static bool emulate_privileged_instruction(EXCEPTION_POINTERS* ep) noexcept {
     ULONG64* const gpr = context_gpr_by_rm(ctx, modrm & 0x07U);
     if (!gpr) return false;
 
-    if (ip[2] == 0x20) {
-        *gpr = g_emulated_irql;
-    } else {
-        g_emulated_irql = static_cast<std::uint8_t>(*gpr & 0xFFU);
+    const auto* ke_get_current_irql = reinterpret_cast<ULONG64*>(nt_stubs_lookup("KeGetCurrentIrql"));
+    if (!ke_get_current_irql) return false;
+
+    // Continue execution at the KeGetCurrentIrql stub. Keep the register target
+    // from MOV r64, CR8 in RCX so the stub can optionally inspect/debug it.
+    ctx->Rcx = *gpr;
+    ctx->Rip = reinterpret_cast<ULONG64>(ke_get_current_irql);
+    std::println(stderr,
+        "[driver_loader] redirected privileged CR8 read at {:p} to KeGetCurrentIrql stub {:p}",
+        ep->ExceptionRecord->ExceptionAddress,
+        reinterpret_cast<void*>(ke_get_current_irql));
+    return true;
+}
+
+static bool emulate_privileged_cr8_write(EXCEPTION_POINTERS* ep) noexcept {
+    if (!ep || !ep->ExceptionRecord || !ep->ContextRecord) return false;
+    if (ep->ExceptionRecord->ExceptionCode != EXCEPTION_PRIV_INSTRUCTION) return false;
+
+    const auto* ip = static_cast<const std::uint8_t*>(ep->ExceptionRecord->ExceptionAddress);
+    if (!ip) return false;
+
+    // Emulate x64 CR8 writes that can still appear in IRQL-raise paths:
+    //   44 0F 22 Cx  => mov cr8, r64
+    if (ip[0] != 0x44 || ip[1] != 0x0F || ip[2] != 0x22) {
+        return false;
     }
+
+    const std::uint8_t modrm = ip[3];
+    if ((modrm & 0xC0U) != 0xC0U) return false;
+    if (((modrm >> 3U) & 0x07U) != 0x00U) return false;
+
+    CONTEXT* const ctx = ep->ContextRecord;
+    ULONG64* const gpr = context_gpr_by_rm(ctx, modrm & 0x07U);
+    if (!gpr) return false;
+
+    g_emulated_irql = static_cast<std::uint8_t>(*gpr & 0xFFU);
     ctx->Rip += 4;
     std::println(stderr,
-        "[driver_loader] emulated privileged CR8 instruction at {:p}",
+        "[driver_loader] emulated privileged CR8 write at {:p}",
         ep->ExceptionRecord->ExceptionAddress);
     return true;
+}
+
+static void print_dbghelp_stack_trace(EXCEPTION_POINTERS* ep) {
+    if (!ep || !ep->ContextRecord) return;
+
+    const HANDLE process = GetCurrentProcess();
+    const HANDLE thread = GetCurrentThread();
+
+    CONTEXT context = *ep->ContextRecord;
+    STACKFRAME64 frame = {};
+    DWORD machine = 0;
+
+#if defined(_M_X64) || defined(__x86_64__)
+    machine = IMAGE_FILE_MACHINE_AMD64;
+    frame.AddrPC.Offset = context.Rip;
+    frame.AddrPC.Mode = AddrModeFlat;
+    frame.AddrFrame.Offset = context.Rbp;
+    frame.AddrFrame.Mode = AddrModeFlat;
+    frame.AddrStack.Offset = context.Rsp;
+    frame.AddrStack.Mode = AddrModeFlat;
+#elif defined(_M_IX86) || defined(__i386__)
+    machine = IMAGE_FILE_MACHINE_I386;
+    frame.AddrPC.Offset = context.Eip;
+    frame.AddrPC.Mode = AddrModeFlat;
+    frame.AddrFrame.Offset = context.Ebp;
+    frame.AddrFrame.Mode = AddrModeFlat;
+    frame.AddrStack.Offset = context.Esp;
+    frame.AddrStack.Mode = AddrModeFlat;
+#else
+    std::println(stderr, "[driver_loader] stack trace not implemented on this architecture");
+    return;
+#endif
+
+    std::println(stderr, "[driver_loader] stack trace:");
+    for (int i = 0; i < 64; ++i) {
+        const BOOL ok = StackWalk64(
+            machine, process, thread, &frame, &context, nullptr,
+            SymFunctionTableAccess64, SymGetModuleBase64, nullptr);
+        if (!ok || frame.AddrPC.Offset == 0) break;
+
+        char symbol_buf[sizeof(SYMBOL_INFO) + MAX_SYM_NAME] = {};
+        auto* symbol = reinterpret_cast<SYMBOL_INFO*>(symbol_buf);
+        symbol->SizeOfStruct = sizeof(SYMBOL_INFO);
+        symbol->MaxNameLen = MAX_SYM_NAME;
+
+        DWORD64 displacement = 0;
+        const bool have_symbol = SymFromAddr(process, frame.AddrPC.Offset, &displacement, symbol) == TRUE;
+
+        IMAGEHLP_LINE64 line = {};
+        line.SizeOfStruct = sizeof(line);
+        DWORD line_displacement = 0;
+        const bool have_line =
+            SymGetLineFromAddr64(process, frame.AddrPC.Offset, &line_displacement, &line) == TRUE;
+
+        if (have_symbol && have_line) {
+            std::println(stderr,
+                "  #{:02} {:p} {}+0x{:X} ({}:{})",
+                i,
+                reinterpret_cast<void*>(frame.AddrPC.Offset),
+                symbol->Name,
+                static_cast<unsigned long long>(displacement),
+                line.FileName,
+                line.LineNumber);
+        } else if (have_symbol) {
+            std::println(stderr,
+                "  #{:02} {:p} {}+0x{:X}",
+                i,
+                reinterpret_cast<void*>(frame.AddrPC.Offset),
+                symbol->Name,
+                static_cast<unsigned long long>(displacement));
+        } else {
+            std::println(stderr,
+                "  #{:02} {:p}",
+                i,
+                reinterpret_cast<void*>(frame.AddrPC.Offset));
+        }
+    }
 }
 } // namespace
 #endif
@@ -115,8 +222,17 @@ static bool emulate_privileged_instruction(EXCEPTION_POINTERS* ep) noexcept {
 static LONG WINAPI entry_exception_diagnostics(EXCEPTION_POINTERS* ep) {
     if (!ep || !ep->ExceptionRecord) return EXCEPTION_CONTINUE_SEARCH;
 #if defined(_M_X64) || defined(__x86_64__)
-    if (emulate_privileged_instruction(ep)) {
+    if (route_kegetcurrentirql_to_stub(ep)) {
         return EXCEPTION_CONTINUE_EXECUTION;
+    }
+    if (emulate_privileged_cr8_write(ep)) {
+        return EXCEPTION_CONTINUE_EXECUTION;
+    }
+    {
+        std::lock_guard<std::mutex> lock(s_dbghelp_mu);
+        if (s_dbghelp_initialized && g_active_entry_loader != nullptr) {
+            print_dbghelp_stack_trace(ep);
+        }
     }
 #endif
     const EXCEPTION_RECORD* er = ep->ExceptionRecord;
@@ -486,9 +602,27 @@ void DriverLoader::LoadPdb(std::string pdb_path) {
         m_dbghelp_attached = true;
     }
 
+    const auto has_pdb_extension = [](const std::string& path) -> bool {
+        if (path.size() < 4) return false;
+        const std::string_view ext(path.c_str() + (path.size() - 4), 4);
+        return iequal(ext, ".pdb");
+    };
+
+    std::string image_for_symbols = m_path;
     if (!pdb_path.empty()) {
-        // Keep the exact user path; DbgHelp accepts ';'-separated list.
-        if (!SymSetSearchPath(proc, pdb_path.c_str())) {
+        std::string search_path = pdb_path;
+        if (has_pdb_extension(pdb_path)) {
+            image_for_symbols = pdb_path;
+            const std::size_t sep = pdb_path.find_last_of("/\\");
+            if (sep == std::string::npos) {
+                search_path = ".";
+            } else if (sep == 0) {
+                search_path = pdb_path.substr(0, 1);
+            } else {
+                search_path = pdb_path.substr(0, sep);
+            }
+        }
+        if (!search_path.empty() && !SymSetSearchPath(proc, search_path.c_str())) {
             throw std::runtime_error("SymSetSearchPath failed for pdb path: " + pdb_path);
         }
     }
@@ -501,7 +635,7 @@ void DriverLoader::LoadPdb(std::string pdb_path) {
     DWORD64 mod_base = SymLoadModuleEx(
         proc,
         nullptr,
-        m_path.c_str(),
+        image_for_symbols.c_str(),
         nullptr,
         reinterpret_cast<DWORD64>(m_base),
         static_cast<DWORD>(m_image_size),
@@ -877,9 +1011,15 @@ NTSTATUS DriverLoader::CallDriverEntry(
     auto* entry = reinterpret_cast<DriverEntryFn>(entry_addr);
     std::println(stderr, "[driver_loader] CallDriverEntry -> {:p}",
                  reinterpret_cast<void*>(entry));
+#if defined(_M_X64) || defined(__x86_64__)
+    g_active_entry_loader = this;
+#endif
     void* veh = AddVectoredExceptionHandler(1, &entry_exception_diagnostics);
     NTSTATUS status = entry(&m_driver_object, &m_registry_path_str);
     if (veh) RemoveVectoredExceptionHandler(veh);
+#if defined(_M_X64) || defined(__x86_64__)
+    g_active_entry_loader = nullptr;
+#endif
     std::println(stderr,
         "[driver_loader] CallDriverEntry <- 0x{:08X}",
         static_cast<unsigned long>(status));

@@ -14,6 +14,8 @@ static VOID NTAPI impl_KeInitializeEvent(KEVENT* event, ULONG /*type*/,
 }
 
 static KIRQL NTAPI impl_KeGetCurrentIrql(VOID) {
+    std::println(stderr, "[nt_stubs] call {} -> PASSIVE_LEVEL", __func__);
+    std::flush(std::cerr);
     return static_cast<KIRQL>(PASSIVE_LEVEL);
 }
 

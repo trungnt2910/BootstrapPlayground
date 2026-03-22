@@ -13,11 +13,20 @@ target_link_libraries(test_host PRIVATE driver_loader)
 target_link_options(test_host PRIVATE -static)
 
 file(GLOB DRIVER_FILES "${CMAKE_SOURCE_DIR}/drivers/*.sys")
+file(GLOB DRIVER_PDB_FILES "${CMAKE_SOURCE_DIR}/drivers/*.pdb")
 
 foreach(driver ${DRIVER_FILES})
     add_custom_command(TARGET test_host POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "${driver}"
+            "$<TARGET_FILE_DIR:test_host>"
+    )
+endforeach()
+
+foreach(driver_pdb ${DRIVER_PDB_FILES})
+    add_custom_command(TARGET test_host POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${driver_pdb}"
             "$<TARGET_FILE_DIR:test_host>"
     )
 endforeach()
