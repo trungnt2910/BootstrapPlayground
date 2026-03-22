@@ -38,8 +38,7 @@ static NTSTATUS NTAPI impl_WdfVersionBind(PDRIVER_OBJECT driverObject,
         return STATUS_INVALID_PARAMETER;
     }
 
-    bindInfo->FuncCount = static_cast<ULONG>(
-        sizeof(s_wdf_function_table_stub) / sizeof(s_wdf_function_table_stub[0]));
+    bindInfo->FuncCount = static_cast<ULONG>(std::size(s_wdf_function_table_stub));
     bindInfo->Module = driverObject;
     if (bindInfo->FuncTable == nullptr) {
         bindInfo->FuncTable = s_wdf_function_table_stub;

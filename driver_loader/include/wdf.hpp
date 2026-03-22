@@ -6,17 +6,13 @@
 // These are replicated because WDF headers are not available in usermode MinGW.
 
 using WDFDRIVER = PVOID;
-constexpr ULONG WDF_DRIVER_GLOBALS_NAME_LEN = 32;
+#define WDF_DRIVER_GLOBALS_NAME_LEN 32
 
 typedef ULONG WDF_MAJOR_VERSION;
 typedef ULONG WDF_MINOR_VERSION;
 typedef ULONG WDF_BUILD_NUMBER;
 
-typedef
-VOID
-(*WDFFUNC)(
-    VOID
-    );
+typedef VOID (*WDFFUNC)(VOID);
 
 typedef struct _WDF_VERSION {
     WDF_MAJOR_VERSION  Major;
