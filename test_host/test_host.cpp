@@ -20,6 +20,7 @@
 #include <print>
 #include <stdexcept>
 #include <string>
+#include <optional>
 
 #include <windows.h>
 
@@ -114,14 +115,14 @@ int main(int argc, char* argv[]) {
 
         // Supply the LxInitialize symbol so the driver's import from lxcore.sys
         // resolves to our stub above.
-        loader.add_symbol("LxInitialize",
-                          reinterpret_cast<void*>(&LxInitialize));
+        loader.SetDriverName(L"lxmonika");
+        loader.AddSymbol("LxInitialize",
+                         reinterpret_cast<void*>(&LxInitialize));
 
-        loader.load();
+        loader.Load();
         std::println(stderr, "[test_host] Driver mapped successfully.");
 
-        const NTSTATUS status = loader.call_driver_entry(
-            L"\\Registry\\Machine\\System\\CurrentControlSet\\Services\\lxmonika");
+        const NTSTATUS status = loader.CallDriverEntry(std::nullopt);
 
         if (!NT_SUCCESS(status)) {
             std::println(stderr,

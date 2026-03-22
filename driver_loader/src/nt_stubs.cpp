@@ -21,6 +21,10 @@
 #include <cstring>
 #include <cwchar>
 #include <cwctype>
+#include <format>
+#include <iostream>
+#include <print>
+#include <string>
 
 // ---------------------------------------------------------------------------
 // Shared stub state
@@ -40,8 +44,8 @@ int next_index = 0;
         const DWORD len = static_cast<DWORD>(std::strlen(msg));
         (void)WriteFile(h, msg, len, &written, nullptr);
     }
-    std::fputs(msg, stderr);
-    std::fflush(stderr);
+    std::println(stderr, "{}", msg);
+    std::flush(std::cerr);
     std::abort();
 }
 
@@ -51,20 +55,17 @@ int next_index = 0;
         ? name_table[static_cast<std::size_t>(idx)]
         : "<unknown>";
     {
-        char enter_buf[320];
-        std::snprintf(enter_buf, sizeof(enter_buf),
-                      "[nt_stubs] handle_call-enter #%d name=%s\n", idx, name);
-        OutputDebugStringA(enter_buf);
-        std::fputs(enter_buf, stderr);
-        std::fflush(stderr);
+        const std::string enter_buf = std::format(
+            "[nt_stubs] handle_call-enter #{} name={}\n", idx, name);
+        OutputDebugStringA(enter_buf.c_str());
+        std::println(stderr, "{}", enter_buf);
+        std::flush(std::cerr);
     }
-    char buf[320];
-    std::snprintf(buf, sizeof(buf),
-                  "[nt_stubs] handle_call-exit  #%d result=<abort> reason=unimplemented symbol=%s\n"
-                  "[nt_stubs] Unimplemented ntoskrnl function called: %s (stub #%d)\n",
-                  idx, name,
-                  name, idx);
-    report_and_abort(buf);
+    const std::string buf = std::format(
+        "[nt_stubs] handle_call-exit  #{} result=<abort> reason=unimplemented symbol={}\n"
+        "[nt_stubs] Unimplemented ntoskrnl function called: {} (stub #{})\n",
+        idx, name, name, idx);
+    report_and_abort(buf.c_str());
 }
 
 } // namespace nt_stubs_internal
@@ -88,9 +89,9 @@ static void* fallback_stub() noexcept {
 void* nt_stubs_allocate(const char* name) noexcept {
     using namespace nt_stubs_internal;
     if (next_index >= 256) {
-        std::fprintf(stderr,
-            "[nt_stubs] Warning: more than 256 stubs requested; "
-            "'%s' will use the fallback stub.\n", name ? name : "<null>");
+        std::println(stderr,
+            "[nt_stubs] Warning: more than 256 stubs requested; '{}' will use the fallback stub.",
+            name ? name : "<null>");
         return reinterpret_cast<void*>(&fallback_stub);
     }
     name_table[static_cast<std::size_t>(next_index)] = name;
@@ -542,7 +543,7 @@ void* nt_stubs_lookup(const char* name) noexcept {
                 // On 32-bit x86, forwarding kernel unwind helpers to ntdll's
                 // user-mode implementations can terminate the process when
                 // unwind metadata/context differs. Prefer local fallbacks.
-                std::fprintf(stderr, "[nt_stubs] lookup %s -> x86 fallback\n", name);
+                std::println(stderr, "[nt_stubs] lookup {} -> x86 fallback", name);
                 if (std::strcmp(sn, "__C_specific_handler") == 0)
                     return reinterpret_cast<void*>(&impl___C_specific_handler_fallback);
                 if (std::strcmp(sn, "_local_unwind") == 0)
@@ -556,8 +557,8 @@ void* nt_stubs_lookup(const char* name) noexcept {
                 if (m) {
                     void* p = reinterpret_cast<void*>(GetProcAddress(m, sn));
                     if (p) {
-                        std::fprintf(stderr,
-                            "[nt_stubs] lookup %s -> ntdll @ %p\n", name, p);
+                        std::println(stderr,
+                            "[nt_stubs] lookup {} -> ntdll @ {:p}", name, p);
                         return p;
                     }
                 }
@@ -567,20 +568,19 @@ void* nt_stubs_lookup(const char* name) noexcept {
                 if (m) {
                     void* p = reinterpret_cast<void*>(GetProcAddress(m, sn));
                     if (p) {
-                        std::fprintf(stderr,
-                            "[nt_stubs] lookup %s -> msvcrt @ %p\n", name, p);
+                        std::println(stderr,
+                            "[nt_stubs] lookup {} -> msvcrt @ {:p}", name, p);
                         return p;
                     }
                 }
                 // Fallback to no-op helpers so DriverEntry can continue on
                 // runtimes where these exports are absent.
-                char msg[256];
-                std::snprintf(msg, sizeof(msg),
-                              "[nt_stubs] Warning: %s not found in ntdll/msvcrt; using fallback implementation.\n",
-                              sn);
-                OutputDebugStringA(msg);
-                std::fputs(msg, stderr);
-                std::fflush(stderr);
+                const std::string msg = std::format(
+                    "[nt_stubs] Warning: {} not found in ntdll/msvcrt; using fallback implementation.\n",
+                    sn);
+                OutputDebugStringA(msg.c_str());
+                std::println(stderr, "{}", msg);
+                std::flush(std::cerr);
                 if (std::strcmp(sn, "__C_specific_handler") == 0)
                     return reinterpret_cast<void*>(&impl___C_specific_handler_fallback);
                 if (std::strcmp(sn, "_local_unwind") == 0)
@@ -596,12 +596,12 @@ void* nt_stubs_lookup(const char* name) noexcept {
 
     for (const auto& sym : s_nt_symbols) {
         if (std::strcmp(sym.name, name) == 0) {
-            std::fprintf(stderr,
-                "[nt_stubs] lookup %s -> builtin @ %p\n", name, sym.address);
+            std::println(stderr,
+                "[nt_stubs] lookup {} -> builtin @ {:p}", name, sym.address);
             return sym.address;
         }
     }
-    std::fprintf(stderr, "[nt_stubs] lookup %s -> <unresolved>\n", name);
+    std::println(stderr, "[nt_stubs] lookup {} -> <unresolved>", name);
     return nullptr;
 }
 

@@ -14,6 +14,7 @@
 #include <ios>
 #include <iterator>
 #include <mutex>
+#include <optional>
 #include <print>
 #include <stdexcept>
 #include <string>
@@ -135,8 +136,13 @@ bool              s_dbghelp_initialized = false;
 // ---------------------------------------------------------------------------
 
 DriverLoader::DriverLoader(std::string path)
-    : m_path(std::move(path))
-{}
+    : m_path(std::move(path)),
+      m_driver_name(DeriveDriverNameFromPath(m_path))
+{
+    if (m_driver_name.empty()) {
+        m_driver_name = L"TestDriver";
+    }
+}
 
 DriverLoader::~DriverLoader() {
     {
@@ -163,20 +169,20 @@ DriverLoader::~DriverLoader() {
 }
 
 // ---------------------------------------------------------------------------
-// add_symbol
+// AddSymbol
 // ---------------------------------------------------------------------------
 
-void DriverLoader::add_symbol(std::string name, void* address) {
+void DriverLoader::AddSymbol(std::string name, void* address) {
     m_extra_symbols.insert_or_assign(std::move(name), address);
 }
 
 // ---------------------------------------------------------------------------
-// load
+// Load
 // ---------------------------------------------------------------------------
 
-void DriverLoader::load() {
+void DriverLoader::Load() {
     if (m_base)
-        throw std::runtime_error("DriverLoader::load() called more than once");
+        throw std::runtime_error("DriverLoader::Load() called more than once");
 
     // ---- Read the file --------------------------------------------------
     std::ifstream ifs(m_path, std::ios::binary);
@@ -229,13 +235,13 @@ void DriverLoader::load() {
         throw std::runtime_error("PE machine type does not match host architecture");
 
     // ---- Map sections ---------------------------------------------------
-    map_sections(file_data, file_size);
+    MapSections(file_data, file_size);
 
     // ---- Relocate -------------------------------------------------------
-    apply_relocations();
+    ApplyRelocations();
 
     // ---- Resolve imports ------------------------------------------------
-    resolve_imports(file_data);
+    ResolveImports(file_data);
 
     // ---- Set per-section memory protections ----------------------------
     const auto* nth_mapped =
@@ -253,13 +259,13 @@ void DriverLoader::load() {
                        sec.Misc.VirtualSize, prot, &old);
     }
 
-    // Flush CPU instruction cache so newly-mapped code is visible.
+    // Flush CPU instruction cache so newly mapped code is visible.
     FlushInstructionCache(GetCurrentProcess(), m_base, m_image_size);
 }
 
-void DriverLoader::load_pdb(std::string pdb_path) {
+void DriverLoader::LoadPdb(std::string pdb_path) {
     if (!m_base) {
-        throw std::runtime_error("DriverLoader::load_pdb() called before load()");
+        throw std::runtime_error("DriverLoader::LoadPdb() called before Load()");
     }
 
     const HANDLE proc = GetCurrentProcess();
@@ -305,18 +311,18 @@ void DriverLoader::load_pdb(std::string pdb_path) {
     m_dbghelp_module_base = static_cast<std::uint64_t>(mod_base);
 
     // Touch symbol loading so failures surface immediately.
-    IMAGEHLP_MODULE64 modinfo = {};
+    IMAGEHLP_MODULEW64 modinfo = {};
     modinfo.SizeOfStruct = sizeof(modinfo);
-    if (!SymGetModuleInfo64(proc, mod_base, &modinfo)) {
-        throw std::runtime_error("SymGetModuleInfo64 failed after SymLoadModuleEx");
+    if (!SymGetModuleInfoW64(proc, mod_base, &modinfo)) {
+        throw std::runtime_error("SymGetModuleInfoW64 failed after SymLoadModuleEx");
     }
 }
 
 // ---------------------------------------------------------------------------
-// map_sections
+// MapSections
 // ---------------------------------------------------------------------------
 
-void DriverLoader::map_sections(const std::byte* file_data,
+void DriverLoader::MapSections(const std::byte* file_data,
                                  std::size_t /*file_size*/) {
     const auto* dos =
         reinterpret_cast<const IMAGE_DOS_HEADER*>(file_data);
@@ -352,10 +358,10 @@ void DriverLoader::map_sections(const std::byte* file_data,
 }
 
 // ---------------------------------------------------------------------------
-// apply_relocations
+// ApplyRelocations
 // ---------------------------------------------------------------------------
 
-void DriverLoader::apply_relocations() {
+void DriverLoader::ApplyRelocations() {
     const auto* dos =
         static_cast<const IMAGE_DOS_HEADER*>(m_base);
     const auto* nth =
@@ -433,7 +439,7 @@ void DriverLoader::apply_relocations() {
                 //   imm16 = (imm4<<12) | (i<<11) | (imm3<<8) | imm8
                 auto* p = reinterpret_cast<DWORD*>(
                     static_cast<char*>(page_base) + offset);
-                auto decode_thumb_imm16 = [](DWORD insn) -> WORD {
+                constexpr auto decode_thumb_imm16 = [](DWORD insn) -> WORD {
                     const WORD imm4 = static_cast<WORD>( insn        & 0x000FU);
                     const WORD i    = static_cast<WORD>((insn >> 10) & 0x0001U);
                     const WORD imm3 = static_cast<WORD>((insn >> 28) & 0x0007U);
@@ -441,7 +447,7 @@ void DriverLoader::apply_relocations() {
                     return static_cast<WORD>((imm4 << 12) | (i << 11) |
                                              (imm3 <<  8) |  imm8);
                 };
-                auto encode_thumb_imm16 = [](DWORD insn, WORD imm16) -> DWORD {
+                constexpr auto encode_thumb_imm16 = [](DWORD insn, WORD imm16) -> DWORD {
                     // Clear the four bit-fields that carry imm16.
                     const DWORD mask =
                         0x000FU            |   // imm4  → bits  [3:0]
@@ -479,10 +485,10 @@ void DriverLoader::apply_relocations() {
 }
 
 // ---------------------------------------------------------------------------
-// resolve_imports
+// ResolveImports
 // ---------------------------------------------------------------------------
 
-void DriverLoader::resolve_imports(const std::byte* /*file_data*/) {
+void DriverLoader::ResolveImports(const std::byte* /*file_data*/) {
     const IMAGE_DATA_DIRECTORY* import_dir =
         get_data_dir(m_base, IMAGE_DIRECTORY_ENTRY_IMPORT);
     if (!import_dir) return;
@@ -514,7 +520,7 @@ void DriverLoader::resolve_imports(const std::byte* /*file_data*/) {
                 // Import by ordinal.
                 const WORD ordinal =
                     static_cast<WORD>(IMAGE_ORDINAL(name_thunk->u1.Ordinal));
-                func_addr = resolve_import(
+                func_addr = ResolveImport(
                     dll_name,
                     std::format("#{}", static_cast<unsigned>(ordinal)));
             } else {
@@ -523,7 +529,7 @@ void DriverLoader::resolve_imports(const std::byte* /*file_data*/) {
                     static_cast<const IMAGE_IMPORT_BY_NAME*>(
                         rva_to_ptr(m_base,
                             static_cast<DWORD>(name_thunk->u1.AddressOfData)));
-                func_addr = resolve_import(dll_name, ibn->Name);
+                func_addr = ResolveImport(dll_name, ibn->Name);
             }
 
             iat->u1.Function = reinterpret_cast<ULONG_PTR>(func_addr);
@@ -537,10 +543,10 @@ void DriverLoader::resolve_imports(const std::byte* /*file_data*/) {
 }
 
 // ---------------------------------------------------------------------------
-// resolve_import
+// ResolveImport
 // ---------------------------------------------------------------------------
 
-void* DriverLoader::resolve_import(std::string_view dll_name,
+void* DriverLoader::ResolveImport(std::string_view dll_name,
                                     std::string_view func_name) {
     std::string name_str(func_name);
 
@@ -567,7 +573,7 @@ void* DriverLoader::resolve_import(std::string_view dll_name,
             return addr;
         }
 
-        // 3. Numbered stub for any unrecognised import.
+        // 3. Numbered stub for any unrecognized import.
         const bool is_ntoskrnl_dll =
             iequal(dll_name, "ntoskrnl.exe") ||
             iequal(dll_name, "ntkrnlpa.exe") ||
@@ -589,13 +595,14 @@ void* DriverLoader::resolve_import(std::string_view dll_name,
 }
 
 // ---------------------------------------------------------------------------
-// call_driver_entry
+// CallDriverEntry
 // ---------------------------------------------------------------------------
 
-NTSTATUS DriverLoader::call_driver_entry(std::wstring_view registry_path) {
+NTSTATUS DriverLoader::CallDriverEntry(
+    const std::optional<std::wstring>& registry_path) {
     if (!m_base)
         throw std::runtime_error(
-            "DriverLoader::call_driver_entry() called before load()");
+            "DriverLoader::CallDriverEntry() called before Load()");
 
     const auto* dos =
         static_cast<const IMAGE_DOS_HEADER*>(m_base);
@@ -606,16 +613,17 @@ NTSTATUS DriverLoader::call_driver_entry(std::wstring_view registry_path) {
     if (nth->OptionalHeader.AddressOfEntryPoint == 0)
         throw std::runtime_error("Driver PE has no entry point");
 
-    // ---- Initialise DRIVER_EXTENSION ------------------------------------
+    // ---- Initialize DRIVER_EXTENSION ------------------------------------
     m_driver_extension          = {};
     m_driver_extension.DriverObject = &m_driver_object;
 
-    // ---- Initialise DRIVER_OBJECT ---------------------------------------
-    m_driver_name_buf = L"\\Driver\\TestDriver";
+    // ---- Initialize DRIVER_OBJECT ---------------------------------------
+    m_driver_name_nt_buf = L"\\Driver\\";
+    m_driver_name_nt_buf += m_driver_name;
     m_driver_name_str.Buffer        =
-        const_cast<WCHAR*>(m_driver_name_buf.c_str());
+        const_cast<WCHAR*>(m_driver_name_nt_buf.c_str());
     m_driver_name_str.Length        =
-        static_cast<USHORT>(m_driver_name_buf.size() * sizeof(WCHAR));
+        static_cast<USHORT>(m_driver_name_nt_buf.size() * sizeof(WCHAR));
     m_driver_name_str.MaximumLength = m_driver_name_str.Length;
 
     m_driver_object                 = {};
@@ -631,8 +639,12 @@ NTSTATUS DriverLoader::call_driver_entry(std::wstring_view registry_path) {
     for (auto& fn : m_driver_object.MajorFunction)
         fn = default_dispatch_fn;
 
-    // ---- Initialise registry path UNICODE_STRING -----------------------
-    m_registry_path_buf.assign(registry_path.begin(), registry_path.end());
+    // ---- Initialize registry path UNICODE_STRING ------------------------
+    if (registry_path.has_value()) {
+        m_registry_path_buf = *registry_path;
+    } else {
+        m_registry_path_buf = BuildDefaultRegistryPath();
+    }
     m_registry_path_str.Buffer        =
         const_cast<WCHAR*>(m_registry_path_buf.c_str());
     m_registry_path_str.Length        =
@@ -652,22 +664,22 @@ NTSTATUS DriverLoader::call_driver_entry(std::wstring_view registry_path) {
     entry_addr |= 1U;  // set Thumb interworking bit
 #endif
     auto* entry = reinterpret_cast<DriverEntryFn>(entry_addr);
-    std::println(stderr, "[driver_loader] call_driver_entry -> {:p}",
+    std::println(stderr, "[driver_loader] CallDriverEntry -> {:p}",
                  reinterpret_cast<void*>(entry));
     void* veh = AddVectoredExceptionHandler(1, &entry_exception_diagnostics);
     NTSTATUS status = entry(&m_driver_object, &m_registry_path_str);
     if (veh) RemoveVectoredExceptionHandler(veh);
     std::println(stderr,
-        "[driver_loader] call_driver_entry <- 0x{:08X}",
+        "[driver_loader] CallDriverEntry <- 0x{:08X}",
         static_cast<unsigned long>(status));
     return status;
 }
 
 // ---------------------------------------------------------------------------
-// get_export  (by name)
+// GetExport  (by name)
 // ---------------------------------------------------------------------------
 
-void* DriverLoader::get_export(std::string_view name) const {
+void* DriverLoader::GetExport(std::string_view name) const {
     if (!m_base) return nullptr;
 
     const IMAGE_DATA_DIRECTORY* export_dir =
@@ -701,10 +713,10 @@ void* DriverLoader::get_export(std::string_view name) const {
 }
 
 // ---------------------------------------------------------------------------
-// get_export  (by ordinal)
+// GetExport  (by ordinal)
 // ---------------------------------------------------------------------------
 
-void* DriverLoader::get_export(std::uint16_t ordinal) const {
+void* DriverLoader::GetExport(std::uint16_t ordinal) const {
     if (!m_base) return nullptr;
 
     const IMAGE_DATA_DIRECTORY* export_dir =
@@ -728,4 +740,48 @@ void* DriverLoader::get_export(std::uint16_t ordinal) const {
         rva < export_dir->VirtualAddress + export_dir->Size)
         return nullptr;  // Forwarded exports not resolved here.
     return rva_to_ptr(m_base, rva);
+}
+
+void* DriverLoader::GetDebugSymbol(std::string_view name) const {
+    if (!m_dbghelp_attached || m_dbghelp_module_base == 0 || name.empty()) {
+        return nullptr;
+    }
+
+    std::string symbol_name(name);
+    SYMBOL_INFO_PACKAGE sip = {};
+    sip.si.SizeOfStruct = sizeof(SYMBOL_INFO);
+    sip.si.MaxNameLen = MAX_SYM_NAME;
+    if (!SymFromName(GetCurrentProcess(), symbol_name.c_str(), &sip.si)) {
+        return nullptr;
+    }
+    return reinterpret_cast<void*>(sip.si.Address);
+}
+
+std::wstring DriverLoader::BuildDefaultRegistryPath() const {
+    std::wstring path = L"\\Registry\\Machine\\System\\CurrentControlSet\\Services\\";
+    path += m_driver_name;
+    return path;
+}
+
+std::wstring DriverLoader::DeriveDriverNameFromPath(std::string_view path) {
+    const std::size_t slash = path.find_last_of("/\\");
+    const std::string_view file =
+        (slash == std::string_view::npos) ? path : path.substr(slash + 1);
+    const std::size_t dot = file.find_last_of('.');
+    const std::string_view stem =
+        (dot == std::string_view::npos) ? file : file.substr(0, dot);
+
+    std::wstring out;
+    out.reserve(stem.size());
+    for (unsigned char ch : stem) {
+        out.push_back(static_cast<wchar_t>(ch));
+    }
+    return out;
+}
+
+void DriverLoader::SetDriverName(std::wstring name) {
+    if (name.empty()) {
+        throw std::runtime_error("Driver name must not be empty");
+    }
+    m_driver_name = std::move(name);
 }

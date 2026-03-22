@@ -2,8 +2,8 @@
 
 static VOID NTAPI impl_RtlInitUnicodeString(UNICODE_STRING* dest,
                                              const WCHAR* src) {
-    std::fprintf(stderr, "[nt_stubs] call %s\n", __func__);
-    std::fflush(stderr);
+    std::println(stderr, "[nt_stubs] call {}", __func__);
+    std::flush(std::cerr);
     if (!dest) return;
     if (!src) {
         dest->Length        = 0;
@@ -22,8 +22,8 @@ static VOID NTAPI impl_RtlInitUnicodeString(UNICODE_STRING* dest,
 static BOOLEAN NTAPI impl_RtlEqualUnicodeString(const UNICODE_STRING* s1,
                                                   const UNICODE_STRING* s2,
                                                   BOOLEAN caseInsensitive) {
-    std::fprintf(stderr, "[nt_stubs] call %s\n", __func__);
-    std::fflush(stderr);
+    std::println(stderr, "[nt_stubs] call {}", __func__);
+    std::flush(std::cerr);
     if (!s1 || !s2) return FALSE;
     if (s1->Length != s2->Length) return FALSE;
     if (s1->Length == 0) return TRUE;
@@ -35,8 +35,8 @@ static BOOLEAN NTAPI impl_RtlEqualUnicodeString(const UNICODE_STRING* s1,
 
 static VOID NTAPI impl_RtlCopyUnicodeString(UNICODE_STRING* dest,
                                              const UNICODE_STRING* src) {
-    std::fprintf(stderr, "[nt_stubs] call %s\n", __func__);
-    std::fflush(stderr);
+    std::println(stderr, "[nt_stubs] call {}", __func__);
+    std::flush(std::cerr);
     if (!dest) return;
     if (!src || !src->Buffer) { dest->Length = 0; return; }
     const USHORT copy = (src->Length < dest->MaximumLength)
@@ -50,8 +50,8 @@ static VOID NTAPI impl_RtlCopyUnicodeString(UNICODE_STRING* dest,
 static LONG NTAPI impl_RtlCompareUnicodeString(const UNICODE_STRING* s1,
                                                 const UNICODE_STRING* s2,
                                                 BOOLEAN caseInsensitive) {
-    std::fprintf(stderr, "[nt_stubs] call %s\n", __func__);
-    std::fflush(stderr);
+    std::println(stderr, "[nt_stubs] call {}", __func__);
+    std::flush(std::cerr);
     if (!s1 || !s2) return 0;
     const USHORT minLen = (s1->Length < s2->Length) ? s1->Length : s2->Length;
     const USHORT nChars = minLen / static_cast<USHORT>(sizeof(WCHAR));
@@ -63,8 +63,8 @@ static LONG NTAPI impl_RtlCompareUnicodeString(const UNICODE_STRING* s1,
 }
 
 static VOID NTAPI impl_RtlFreeUnicodeString(UNICODE_STRING* str) {
-    std::fprintf(stderr, "[nt_stubs] call %s\n", __func__);
-    std::fflush(stderr);
+    std::println(stderr, "[nt_stubs] call {}", __func__);
+    std::flush(std::cerr);
     if (str && str->Buffer) {
         HeapFree(GetProcessHeap(), 0, str->Buffer);
         str->Buffer        = nullptr;
@@ -77,8 +77,8 @@ static VOID NTAPI impl_RtlFreeUnicodeString(UNICODE_STRING* str) {
 
 static SIZE_T NTAPI impl_RtlCompareMemory(const VOID* s1, const VOID* s2,
                                            SIZE_T len) {
-    std::fprintf(stderr, "[nt_stubs] call %s\n", __func__);
-    std::fflush(stderr);
+    std::println(stderr, "[nt_stubs] call {}", __func__);
+    std::flush(std::cerr);
     const auto* a = static_cast<const unsigned char*>(s1);
     const auto* b = static_cast<const unsigned char*>(s2);
     SIZE_T i = 0;
@@ -88,19 +88,20 @@ static SIZE_T NTAPI impl_RtlCompareMemory(const VOID* s1, const VOID* s2,
 
 static VOID NTAPI impl_RtlAssert(PVOID assertion, PVOID fileName,
                                    ULONG line, char* message) {
-    std::fprintf(stderr, "[nt_stubs] call %s\n", __func__);
-    std::fflush(stderr);
-    std::fprintf(stderr, "[nt_stubs] RtlAssert: '%s' at %s:%lu%s%s\n",
+    std::println(stderr, "[nt_stubs] call {}", __func__);
+    std::flush(std::cerr);
+    std::println(stderr, "[nt_stubs] RtlAssert: '{}' at {}:{}{}{}",
         static_cast<const char*>(assertion),
         static_cast<const char*>(fileName),
         static_cast<unsigned long>(line),
         message ? ": " : "",
         message ? message : "");
+    std::flush(std::cerr);
 }
 
 static WCHAR* NTAPI impl_RtlGetNtSystemRoot(VOID) {
-    std::fprintf(stderr, "[nt_stubs] call %s\n", __func__);
-    std::fflush(stderr);
+    std::println(stderr, "[nt_stubs] call {}", __func__);
+    std::flush(std::cerr);
     static WCHAR s_root[] = L"C:\\Windows";
     return s_root;
 }
@@ -109,8 +110,8 @@ static NTSTATUS NTAPI impl_RtlUTF8ToUnicodeN(WCHAR* dest, ULONG destLen,
                                                ULONG* resultLen,
                                                const char* src,
                                                ULONG srcLen) {
-    std::fprintf(stderr, "[nt_stubs] call %s\n", __func__);
-    std::fflush(stderr);
+    std::println(stderr, "[nt_stubs] call {}", __func__);
+    std::flush(std::cerr);
     if (!src) return STATUS_INVALID_PARAMETER;
     int n = MultiByteToWideChar(CP_UTF8, 0, src, static_cast<int>(srcLen),
                                  dest,
@@ -128,22 +129,22 @@ static NTSTATUS NTAPI impl_RtlUTF8ToUnicodeN(WCHAR* dest, ULONG destLen,
 
 static NTSTATUS NTAPI impl_RtlCreateSecurityDescriptor(PVOID sd,
                                                          ULONG /*revision*/) {
-    std::fprintf(stderr, "[nt_stubs] call %s\n", __func__);
-    std::fflush(stderr);
+    std::println(stderr, "[nt_stubs] call {}", __func__);
+    std::flush(std::cerr);
     if (sd) std::memset(sd, 0, 20);
     return STATUS_SUCCESS;
 }
 
 static ULONG NTAPI impl_RtlLengthSecurityDescriptor(PVOID /*sd*/) {
-    std::fprintf(stderr, "[nt_stubs] call %s\n", __func__);
-    std::fflush(stderr);
+    std::println(stderr, "[nt_stubs] call {}", __func__);
+    std::flush(std::cerr);
     return 0;
 }
 
 static NTSTATUS NTAPI impl_RtlGetDaclSecurityDescriptor(PVOID /*sd*/,
                         BOOLEAN* present, PVOID* dacl, BOOLEAN* defaulted) {
-    std::fprintf(stderr, "[nt_stubs] call %s\n", __func__);
-    std::fflush(stderr);
+    std::println(stderr, "[nt_stubs] call {}", __func__);
+    std::flush(std::cerr);
     if (present)   *present   = FALSE;
     if (dacl)      *dacl      = nullptr;
     if (defaulted) *defaulted = FALSE;
@@ -152,8 +153,8 @@ static NTSTATUS NTAPI impl_RtlGetDaclSecurityDescriptor(PVOID /*sd*/,
 
 static NTSTATUS NTAPI impl_RtlGetGroupSecurityDescriptor(PVOID /*sd*/,
                         PVOID* group, BOOLEAN* defaulted) {
-    std::fprintf(stderr, "[nt_stubs] call %s\n", __func__);
-    std::fflush(stderr);
+    std::println(stderr, "[nt_stubs] call {}", __func__);
+    std::flush(std::cerr);
     if (group)     *group     = nullptr;
     if (defaulted) *defaulted = FALSE;
     return STATUS_SUCCESS;
@@ -161,8 +162,8 @@ static NTSTATUS NTAPI impl_RtlGetGroupSecurityDescriptor(PVOID /*sd*/,
 
 static NTSTATUS NTAPI impl_RtlGetOwnerSecurityDescriptor(PVOID /*sd*/,
                         PVOID* owner, BOOLEAN* defaulted) {
-    std::fprintf(stderr, "[nt_stubs] call %s\n", __func__);
-    std::fflush(stderr);
+    std::println(stderr, "[nt_stubs] call {}", __func__);
+    std::flush(std::cerr);
     if (owner)     *owner     = nullptr;
     if (defaulted) *defaulted = FALSE;
     return STATUS_SUCCESS;
@@ -170,8 +171,8 @@ static NTSTATUS NTAPI impl_RtlGetOwnerSecurityDescriptor(PVOID /*sd*/,
 
 static NTSTATUS NTAPI impl_RtlGetSaclSecurityDescriptor(PVOID /*sd*/,
                         BOOLEAN* present, PVOID* sacl, BOOLEAN* defaulted) {
-    std::fprintf(stderr, "[nt_stubs] call %s\n", __func__);
-    std::fflush(stderr);
+    std::println(stderr, "[nt_stubs] call {}", __func__);
+    std::flush(std::cerr);
     if (present)   *present   = FALSE;
     if (sacl)      *sacl      = nullptr;
     if (defaulted) *defaulted = FALSE;
@@ -181,23 +182,23 @@ static NTSTATUS NTAPI impl_RtlGetSaclSecurityDescriptor(PVOID /*sd*/,
 static NTSTATUS NTAPI impl_RtlSetDaclSecurityDescriptor(PVOID /*sd*/,
                         BOOLEAN /*present*/, PVOID /*dacl*/,
                         BOOLEAN /*defaulted*/) {
-    std::fprintf(stderr, "[nt_stubs] call %s\n", __func__);
-    std::fflush(stderr);
+    std::println(stderr, "[nt_stubs] call {}", __func__);
+    std::flush(std::cerr);
     return STATUS_SUCCESS;
 }
 
 static NTSTATUS NTAPI impl_RtlAbsoluteToSelfRelativeSD(PVOID /*absoluteSD*/,
                         PVOID /*selfRelSD*/, ULONG* bufLen) {
-    std::fprintf(stderr, "[nt_stubs] call %s\n", __func__);
-    std::fflush(stderr);
+    std::println(stderr, "[nt_stubs] call {}", __func__);
+    std::flush(std::cerr);
     if (bufLen) *bufLen = 0;
     return STATUS_SUCCESS;
 }
 
 static NTSTATUS NTAPI impl_RtlAddAccessAllowedAce(PVOID /*acl*/,
                         ULONG /*aceRev*/, ULONG /*access*/, PVOID /*sid*/) {
-    std::fprintf(stderr, "[nt_stubs] call %s\n", __func__);
-    std::fflush(stderr);
+    std::println(stderr, "[nt_stubs] call {}", __func__);
+    std::flush(std::cerr);
     return STATUS_SUCCESS;
 }
 
@@ -206,8 +207,8 @@ static ULONG NTAPI impl_RtlLengthSid(PVOID /*sid*/) { return 0; }
 static NTSTATUS NTAPI impl_SeCaptureSecurityDescriptor(PVOID srcSD,
                         ULONG /*accessMode*/, ULONG /*poolType*/,
                         BOOLEAN /*captureIfKernel*/, PVOID* capturedSD) {
-    std::fprintf(stderr, "[nt_stubs] call %s\n", __func__);
-    std::fflush(stderr);
+    std::println(stderr, "[nt_stubs] call {}", __func__);
+    std::flush(std::cerr);
     if (capturedSD) *capturedSD = srcSD;
     return STATUS_SUCCESS;
 }
@@ -217,55 +218,55 @@ static NTSTATUS NTAPI impl_SeCaptureSecurityDescriptor(PVOID srcSD,
 static PVOID NTAPI impl_ExAllocatePoolWithTag(ULONG /*poolType*/,
                                                SIZE_T numberOfBytes,
                                                ULONG /*tag*/) {
-    std::fprintf(stderr, "[nt_stubs] call %s\n", __func__);
-    std::fflush(stderr);
+    std::println(stderr, "[nt_stubs] call {}", __func__);
+    std::flush(std::cerr);
     return HeapAlloc(GetProcessHeap(), 0, numberOfBytes);
 }
 
 static PVOID NTAPI impl_ExAllocatePool2(ULONGLONG /*poolFlags*/,
                                          SIZE_T numberOfBytes,
                                          ULONG /*tag*/) {
-    std::fprintf(stderr, "[nt_stubs] call %s\n", __func__);
-    std::fflush(stderr);
+    std::println(stderr, "[nt_stubs] call {}", __func__);
+    std::flush(std::cerr);
     return HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, numberOfBytes);
 }
 
 static VOID NTAPI impl_ExFreePool(PVOID p) {
-    std::fprintf(stderr, "[nt_stubs] call %s\n", __func__);
-    std::fflush(stderr);
+    std::println(stderr, "[nt_stubs] call {}", __func__);
+    std::flush(std::cerr);
     if (p) HeapFree(GetProcessHeap(), 0, p);
 }
 
 static VOID NTAPI impl_ExFreePoolWithTag(PVOID p, ULONG /*tag*/) {
-    std::fprintf(stderr, "[nt_stubs] call %s\n", __func__);
-    std::fflush(stderr);
+    std::println(stderr, "[nt_stubs] call {}", __func__);
+    std::flush(std::cerr);
     if (p) HeapFree(GetProcessHeap(), 0, p);
 }
 
 // ---- Mutex / event / spin-lock ---------------------------------------------
 
 static VOID FASTCALL impl_ExAcquireFastMutex(FAST_MUTEX* mutex) {
-    std::fprintf(stderr, "[nt_stubs] call %s\n", __func__);
-    std::fflush(stderr);
+    std::println(stderr, "[nt_stubs] call {}", __func__);
+    std::flush(std::cerr);
     if (mutex) InterlockedDecrement(&mutex->Count);
 }
 
 static VOID FASTCALL impl_ExReleaseFastMutex(FAST_MUTEX* mutex) {
-    std::fprintf(stderr, "[nt_stubs] call %s\n", __func__);
-    std::fflush(stderr);
+    std::println(stderr, "[nt_stubs] call {}", __func__);
+    std::flush(std::cerr);
     if (mutex) InterlockedIncrement(&mutex->Count);
 }
 
 static VOID NTAPI impl_KeInitializeSpinLock(ULONG_PTR* spinLock) {
-    std::fprintf(stderr, "[nt_stubs] call %s\n", __func__);
-    std::fflush(stderr);
+    std::println(stderr, "[nt_stubs] call {}", __func__);
+    std::flush(std::cerr);
     if (spinLock) *spinLock = 0;
 }
 
 static VOID NTAPI impl_KeInitializeEvent(KEVENT* event, ULONG /*type*/,
                                           BOOLEAN state) {
-    std::fprintf(stderr, "[nt_stubs] call %s\n", __func__);
-    std::fflush(stderr);
+    std::println(stderr, "[nt_stubs] call {}", __func__);
+    std::flush(std::cerr);
     if (event) event->Signaled = state ? 1 : 0;
 }
 
@@ -276,9 +277,9 @@ static KIRQL NTAPI impl_KeGetCurrentIrql(VOID) {
 }
 
 static KIRQL NTAPI impl_KeRaiseIrqlToDpcLevel(VOID) {
-    std::fprintf(stderr,
-        "[nt_stubs] call KeRaiseIrqlToDpcLevel -> PASSIVE_LEVEL\n");
-    std::fflush(stderr);
+    std::println(stderr,
+        "[nt_stubs] call KeRaiseIrqlToDpcLevel -> PASSIVE_LEVEL");
+    std::flush(std::cerr);
     return static_cast<KIRQL>(PASSIVE_LEVEL);
 }
 
@@ -287,9 +288,9 @@ static KIRQL FASTCALL impl_KfRaiseIrql(KIRQL /*newIrql*/) {
 }
 
 static VOID NTAPI impl_RtlFailFast(ULONG_PTR code) {
-    std::fprintf(stderr,
-        "[nt_stubs] call RtlFailFast(code=0x%llX)\n",
+    std::println(stderr,
+        "[nt_stubs] call RtlFailFast(code=0x{:X})",
         static_cast<unsigned long long>(code));
-    std::fflush(stderr);
+    std::flush(std::cerr);
     std::abort();
 }

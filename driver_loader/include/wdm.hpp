@@ -346,7 +346,7 @@ typedef struct _FAST_MUTEX {
 #endif
 
 // ---------------------------------------------------------------------------
-// SE_EXPORTS – large opaque blob; we zero-initialise it in our stubs.
+// SE_EXPORTS – large opaque blob; we zero-initialize it in our stubs.
 // The real WDK definition lists many privilege LUIDs and SID pointers.
 // ---------------------------------------------------------------------------
 
