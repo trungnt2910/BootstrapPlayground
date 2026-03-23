@@ -36,8 +36,17 @@ static NTSTATUS NTAPI impl_WdfVersionBind(PDRIVER_OBJECT driverObject,
 
     bindInfo->FuncCount = kWdfFunctionTableStubCount;
     bindInfo->Module = driverObject;
-    if (bindInfo->FuncTable == nullptr) {
-        bindInfo->FuncTable = s_wdf_function_table_stub.data();
+
+    // Some consumers treat FuncTable as the function-table pointer directly,
+    // while others pass a storage slot through the existing FuncTable value.
+    // Populate both forms defensively.
+    WDFFUNC* funcTableField = bindInfo->FuncTable;
+    bindInfo->FuncTable = s_wdf_function_table_stub.data();
+    if (funcTableField != nullptr && funcTableField != bindInfo->FuncTable) {
+        __try {
+            *funcTableField = (WDFFUNC)(PVOID)bindInfo->FuncTable;
+        } __except (EXCEPTION_EXECUTE_HANDLER) {
+        }
     }
 
     auto& driver_globals = loader->WdfDriverGlobals();
