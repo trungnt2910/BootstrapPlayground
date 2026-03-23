@@ -66,7 +66,7 @@ public:
     //
     // Requires: IsLoaded() == true.
     // Throws std::runtime_error on failure.
-    void LoadPdb(std::string pdb_path);
+    void LoadPdb(const std::string& pdbPath);
 
     // -----------------------------------------------------------------------
     // Execution
@@ -141,7 +141,7 @@ public:
     // zeroes both output values.
     [[nodiscard]] bool GetDebugSymbolRange(const std::string& name,
                                            std::uintptr_t& start,
-                                           std::uintptr_t& end_exclusive) const;
+                                           std::uintptr_t& endExclusive) const;
     [[nodiscard]] std::optional<std::pair<std::uintptr_t, std::uintptr_t>>
     TryGetDebugSymbolRange(const std::string& name) const;
 
@@ -152,6 +152,10 @@ public:
     }
 
     [[nodiscard]] void* GetBase() const noexcept { return m_base; }
+    [[nodiscard]] std::size_t GetImageSize() const noexcept { return m_image_size; }
+    [[nodiscard]] bool HasLoadedDebugSymbols() const noexcept {
+        return m_dbghelp_attached && m_dbghelp_module_base != 0;
+    }
     [[nodiscard]] WDF_DRIVER_GLOBALS& WdfDriverGlobals() noexcept { return m_wdf_driver_globals; }
     [[nodiscard]] static DriverLoader* FromDriverObject(const DRIVER_OBJECT* driver_object) noexcept;
 

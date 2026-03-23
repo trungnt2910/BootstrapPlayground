@@ -57,11 +57,10 @@ static NTSTATUS NTAPI default_dispatch_fn(DEVICE_OBJECT* /*dev*/,
     return STATUS_NOT_SUPPORTED;
 }
 
-#if defined(_M_X64) || defined(__x86_64__)
 namespace {
-thread_local DriverLoader* g_active_entry_loader = nullptr;
+thread_local DriverLoader* gActiveEntryLoader = nullptr;
 
-static void print_dbghelp_stack_trace(EXCEPTION_POINTERS* ep) {
+static void PrintDbghelpStackTrace(EXCEPTION_POINTERS* ep) {
     if (!ep || !ep->ContextRecord) return;
 
     const HANDLE process = GetCurrentProcess();
@@ -106,6 +105,7 @@ static void print_dbghelp_stack_trace(EXCEPTION_POINTERS* ep) {
 
         DWORD64 displacement = 0;
         const bool have_symbol = SymFromAddr(process, frame.AddrPC.Offset, &displacement, symbol) == TRUE;
+        const DWORD symbol_lookup_error = have_symbol ? 0 : GetLastError();
 
         IMAGEHLP_LINE64 line = {};
         line.SizeOfStruct = sizeof(line);
@@ -135,10 +135,26 @@ static void print_dbghelp_stack_trace(EXCEPTION_POINTERS* ep) {
                 i,
                 reinterpret_cast<void*>(frame.AddrPC.Offset));
         }
+#ifndef NDEBUG
+        if (!have_symbol &&
+            gActiveEntryLoader != nullptr &&
+            gActiveEntryLoader->HasLoadedDebugSymbols()) {
+            const std::uintptr_t image_start =
+                reinterpret_cast<std::uintptr_t>(gActiveEntryLoader->GetBase());
+            const std::size_t image_size = gActiveEntryLoader->GetImageSize();
+            const std::uintptr_t image_end = image_start + image_size;
+            const std::uintptr_t current_pc = static_cast<std::uintptr_t>(frame.AddrPC.Offset);
+            if (image_size > 0 && current_pc >= image_start && current_pc < image_end) {
+                std::println(stderr,
+                    "[driver_loader] SymFromAddr(0x{:X}) lookup failed: GetLastError()={}",
+                    static_cast<unsigned long long>(current_pc),
+                    static_cast<unsigned long>(symbol_lookup_error));
+            }
+        }
+#endif
     }
 }
 } // namespace
-#endif
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -196,21 +212,21 @@ bool              s_dbghelp_initialized = false;
 
 struct DebugSymbolRange final {
     std::uintptr_t start = 0;
-    std::uintptr_t end_exclusive = 0;
+    std::uintptr_t endExclusive = 0;
 };
 
 [[nodiscard]] bool TryResolveSymbolRange(DriverLoader* loader,
-                                         const char* symbol_name,
+                                         const char* symbolName,
                                          DebugSymbolRange& range) noexcept {
     range = {};
-    if (!loader || !symbol_name) return false;
-    return loader->GetDebugSymbolRange(symbol_name, range.start, range.end_exclusive);
+    if (!loader || !symbolName) return false;
+    return loader->GetDebugSymbolRange(symbolName, range.start, range.endExclusive);
 }
 
 [[nodiscard]] bool TryRedirectPrivilegedInstruction(EXCEPTION_POINTERS* ep,
                                                     const DebugSymbolRange& range,
-                                                    const void* target_function) noexcept {
-    if (!ep || !ep->ExceptionRecord || !ep->ContextRecord || !target_function) {
+                                                    const void* targetFunction) noexcept {
+    if (!ep || !ep->ExceptionRecord || !ep->ContextRecord || !targetFunction) {
         return false;
     }
     if (ep->ExceptionRecord->ExceptionCode != EXCEPTION_PRIV_INSTRUCTION) {
@@ -218,43 +234,41 @@ struct DebugSymbolRange final {
     }
     const std::uintptr_t fault_ip =
         reinterpret_cast<std::uintptr_t>(ep->ExceptionRecord->ExceptionAddress);
-    if (fault_ip < range.start || fault_ip >= range.end_exclusive) {
+    if (fault_ip < range.start || fault_ip >= range.endExclusive) {
         return false;
     }
 #if defined(_M_X64) || defined(__x86_64__)
-    ep->ContextRecord->Rip = reinterpret_cast<DWORD64>(target_function);
+    ep->ContextRecord->Rip = reinterpret_cast<DWORD64>(targetFunction);
 #elif defined(_M_IX86) || defined(__i386__)
-    ep->ContextRecord->Eip = reinterpret_cast<DWORD>(target_function);
+    ep->ContextRecord->Eip = reinterpret_cast<DWORD>(targetFunction);
 #elif defined(_M_ARM64) || defined(__aarch64__) || defined(_M_ARM) || defined(__arm__)
-    ep->ContextRecord->Pc = reinterpret_cast<DWORD64>(target_function);
+    ep->ContextRecord->Pc = reinterpret_cast<DWORD64>(targetFunction);
 #else
     return false;
 #endif
     return true;
 }
 
-LONG WINAPI entry_exception_diagnostics(EXCEPTION_POINTERS* ep) {
+LONG WINAPI EntryExceptionDiagnostics(EXCEPTION_POINTERS* ep) {
     if (!ep || !ep->ExceptionRecord) return EXCEPTION_CONTINUE_SEARCH;
-#if defined(_M_X64) || defined(__x86_64__)
-    DebugSymbolRange ke_get_current_irql_range{};
-    if (TryResolveSymbolRange(g_active_entry_loader, "KeGetCurrentIrql", ke_get_current_irql_range)) {
-        const void* ke_get_current_irql_stub = nt_stubs_lookup("KeGetCurrentIrql");
-        if (ke_get_current_irql_stub != nullptr &&
-            TryRedirectPrivilegedInstruction(ep, ke_get_current_irql_range, ke_get_current_irql_stub)) {
+    DebugSymbolRange keGetCurrentIrqlRange{};
+    if (TryResolveSymbolRange(gActiveEntryLoader, "KeGetCurrentIrql", keGetCurrentIrqlRange)) {
+        const void* keGetCurrentIrqlStub = nt_stubs_lookup("KeGetCurrentIrql");
+        if (keGetCurrentIrqlStub != nullptr &&
+            TryRedirectPrivilegedInstruction(ep, keGetCurrentIrqlRange, keGetCurrentIrqlStub)) {
             std::println(stderr,
                 "[driver_loader] redirected privileged instruction at {:p} to KeGetCurrentIrql stub {:p}",
                 ep->ExceptionRecord->ExceptionAddress,
-                ke_get_current_irql_stub);
+                keGetCurrentIrqlStub);
             return EXCEPTION_CONTINUE_EXECUTION;
         }
     }
     {
         std::lock_guard<std::mutex> lock(s_dbghelp_mu);
-        if (s_dbghelp_initialized && g_active_entry_loader != nullptr) {
-            print_dbghelp_stack_trace(ep);
+        if (s_dbghelp_initialized && gActiveEntryLoader != nullptr) {
+            PrintDbghelpStackTrace(ep);
         }
     }
-#endif
     const EXCEPTION_RECORD* er = ep->ExceptionRecord;
     ULONG_PTR access_type = 0;
     ULONG_PTR access_addr = 0;
@@ -564,7 +578,7 @@ void DriverLoader::InitializeSecurityCookie() {
     *cookie_ptr = cookie;
 }
 
-void DriverLoader::LoadPdb(std::string pdb_path) {
+void DriverLoader::LoadPdb(const std::string& pdbPath) {
     if (!m_base) {
         throw std::runtime_error("DriverLoader::LoadPdb() called before Load()");
     }
@@ -592,21 +606,33 @@ void DriverLoader::LoadPdb(std::string pdb_path) {
     };
 
     std::string image_for_symbols = m_path;
-    if (!pdb_path.empty()) {
-        std::string search_path = pdb_path;
-        if (has_pdb_extension(pdb_path)) {
-            image_for_symbols = pdb_path;
-            const std::size_t sep = pdb_path.find_last_of("/\\");
+    if (!pdbPath.empty()) {
+        const DWORD attributes = GetFileAttributesA(pdbPath.c_str());
+        if (attributes == INVALID_FILE_ATTRIBUTES) {
+            const DWORD attribute_error = GetLastError();
+            throw std::runtime_error(std::format(
+                "PDB path is invalid or inaccessible: {} (GetLastError={})",
+                pdbPath,
+                static_cast<unsigned long>(attribute_error)));
+        }
+        if ((attributes & FILE_ATTRIBUTE_DIRECTORY) != 0) {
+            throw std::runtime_error("PDB path is a directory, not a file: " + pdbPath);
+        }
+
+        std::string search_path = pdbPath;
+        if (has_pdb_extension(pdbPath)) {
+            image_for_symbols = pdbPath;
+            const std::size_t sep = pdbPath.find_last_of("/\\");
             if (sep == std::string::npos) {
                 search_path = ".";
             } else if (sep == 0) {
-                search_path = pdb_path.substr(0, 1);
+                search_path = pdbPath.substr(0, 1);
             } else {
-                search_path = pdb_path.substr(0, sep);
+                search_path = pdbPath.substr(0, sep);
             }
         }
         if (!search_path.empty() && !SymSetSearchPath(proc, search_path.c_str())) {
-            throw std::runtime_error("SymSetSearchPath failed for pdb path: " + pdb_path);
+            throw std::runtime_error("SymSetSearchPath failed for pdb path: " + pdbPath);
         }
     }
 
@@ -994,15 +1020,11 @@ NTSTATUS DriverLoader::CallDriverEntry(
     auto* entry = reinterpret_cast<DriverEntryFn>(entry_addr);
     std::println(stderr, "[driver_loader] CallDriverEntry -> {:p}",
                  reinterpret_cast<void*>(entry));
-#if defined(_M_X64) || defined(__x86_64__)
-    g_active_entry_loader = this;
-#endif
-    void* veh = AddVectoredExceptionHandler(1, &entry_exception_diagnostics);
+    gActiveEntryLoader = this;
+    void* veh = AddVectoredExceptionHandler(1, &EntryExceptionDiagnostics);
     NTSTATUS status = entry(&m_driver_object, &m_registry_path_str);
     if (veh) RemoveVectoredExceptionHandler(veh);
-#if defined(_M_X64) || defined(__x86_64__)
-    g_active_entry_loader = nullptr;
-#endif
+    gActiveEntryLoader = nullptr;
     std::println(stderr,
         "[driver_loader] CallDriverEntry <- 0x{:08X}",
         static_cast<unsigned long>(status));
@@ -1092,9 +1114,9 @@ void* DriverLoader::GetDebugSymbol(const std::string& name) const {
 
 bool DriverLoader::GetDebugSymbolRange(const std::string& name,
                                        std::uintptr_t& start,
-                                       std::uintptr_t& end_exclusive) const {
+                                       std::uintptr_t& endExclusive) const {
     start = 0;
-    end_exclusive = 0;
+    endExclusive = 0;
     if (!m_dbghelp_attached || m_dbghelp_module_base == 0 || name.empty()) {
         return false;
     }
@@ -1127,18 +1149,18 @@ bool DriverLoader::GetDebugSymbolRange(const std::string& name,
         return false;
     }
     start = static_cast<std::uintptr_t>(symbol_start);
-    end_exclusive = static_cast<std::uintptr_t>(symbol_end_exclusive);
+    endExclusive = static_cast<std::uintptr_t>(symbol_end_exclusive);
     return true;
 }
 
 std::optional<std::pair<std::uintptr_t, std::uintptr_t>>
 DriverLoader::TryGetDebugSymbolRange(const std::string& name) const {
     std::uintptr_t start = 0;
-    std::uintptr_t end_exclusive = 0;
-    if (!GetDebugSymbolRange(name, start, end_exclusive)) {
+    std::uintptr_t endExclusive = 0;
+    if (!GetDebugSymbolRange(name, start, endExclusive)) {
         return std::nullopt;
     }
-    return std::make_pair(start, end_exclusive);
+    return std::make_pair(start, endExclusive);
 }
 
 std::wstring DriverLoader::BuildDefaultRegistryPath() const {
