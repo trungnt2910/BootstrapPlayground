@@ -751,7 +751,10 @@ void DriverLoader::LoadPdb(const std::string &pdbPath)
         0);
     if (mod_base == 0)
     {
-        throw std::runtime_error("SymLoadModuleEx failed for image: " + m_path);
+        DWORD error = GetLastError();
+        throw std::runtime_error(
+            "SymLoadModuleEx failed for image: " + m_path + ", error=" + std::to_string(error)
+        );
     }
     m_dbghelpModuleBase = static_cast<std::uint64_t>(mod_base);
 
