@@ -125,20 +125,25 @@ int main(int argc, char* argv[]) {
 
         loader.Load();
         std::println(stderr, "[test_host] Driver loaded at {}.", loader.GetBase());
-        loader.LoadPdb(LXMONIKA_PDB);
-        std::println(stderr, "[test_host] Loaded PDB: {}", LXMONIKA_PDB);
+        if (GetFileAttributesA(LXMONIKA_PDB) != INVALID_FILE_ATTRIBUTES) {
+            loader.LoadPdb(LXMONIKA_PDB);
+            std::println(stderr, "[test_host] Loaded PDB: {}", LXMONIKA_PDB);
+        } else {
+            std::println(stderr, "[test_host] PDB not found, skipping symbol load: {}", LXMONIKA_PDB);
+        }
 
         const NTSTATUS status = loader.CallDriverEntry(std::nullopt);
 
-        if (!NT_SUCCESS(status)) {
+        if (status != STATUS_NOT_SUPPORTED) {
             std::println(stderr,
-                "[test_host] FAIL: DriverEntry returned 0x{:08X}",
-                static_cast<unsigned long>(status));
+                "[test_host] FAIL: DriverEntry returned 0x{:08X}, expected STATUS_NOT_SUPPORTED (0x{:08X})",
+                static_cast<unsigned long>(status),
+                static_cast<unsigned long>(STATUS_NOT_SUPPORTED));
             return EXIT_FAILURE;
         }
 
         std::println(stderr,
-            "[test_host] DriverEntry returned STATUS_SUCCESS (0x{:08X}).",
+            "[test_host] DriverEntry returned STATUS_NOT_SUPPORTED (0x{:08X}) as expected.",
             static_cast<unsigned long>(status));
 
         std::println("[test_host] PASS");

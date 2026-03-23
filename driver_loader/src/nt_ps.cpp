@@ -4,7 +4,7 @@ static NTSTATUS NTAPI impl_PsRegisterPicoProvider(PVOID /*provider*/,
                                                     PVOID /*routines*/) {
     std::println(stderr, "[nt_stubs] call {}", __func__);
     std::flush(std::cerr);
-    return STATUS_SUCCESS;
+    return STATUS_TOO_LATE;
 }
 
 static PVOID NTAPI impl_PsGetCurrentProcessId(VOID) {
