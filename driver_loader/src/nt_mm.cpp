@@ -1,6 +1,6 @@
 // ---- Mm* --------------------------------------------------------------------
 
-#include <Windows.h>
+#include <windows.h>
 
 #include "wdm.hpp"
 

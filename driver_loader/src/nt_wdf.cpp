@@ -4,7 +4,7 @@
 #include <iostream>
 #include <print>
 
-#include <Windows.h>
+#include <windows.h>
 
 #include "driver_loader.hpp"
 #include "wdf.hpp"

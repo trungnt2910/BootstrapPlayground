@@ -1,6 +1,6 @@
 // ---- Ps* --------------------------------------------------------------------
 
-#include <Windows.h>
+#include <windows.h>
 
 #include "nt_stubs_internal.hpp"
 

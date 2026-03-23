@@ -8,7 +8,7 @@
 #include <cstddef>
 #include <string>
 
-#include <Windows.h>
+#include <windows.h>
 
 #include "logger.hpp"
 #include "wdm.hpp"
