@@ -105,7 +105,9 @@ static void PrintDbghelpStackTrace(EXCEPTION_POINTERS* ep) {
 
         DWORD64 displacement = 0;
         const bool have_symbol = SymFromAddr(process, frame.AddrPC.Offset, &displacement, symbol) == TRUE;
-        const DWORD symbol_lookup_error = have_symbol ? 0 : GetLastError();
+#ifndef NDEBUG
+        const DWORD symbolLookupError = have_symbol ? 0 : GetLastError();
+#endif
 
         IMAGEHLP_LINE64 line = {};
         line.SizeOfStruct = sizeof(line);
@@ -148,7 +150,7 @@ static void PrintDbghelpStackTrace(EXCEPTION_POINTERS* ep) {
                 std::println(stderr,
                     "[driver_loader] SymFromAddr(0x{:X}) lookup failed: GetLastError()={}",
                     static_cast<unsigned long long>(current_pc),
-                    static_cast<unsigned long>(symbol_lookup_error));
+                    static_cast<unsigned long>(symbolLookupError));
             }
         }
 #endif
