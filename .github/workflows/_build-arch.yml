@@ -190,4 +190,5 @@ jobs:
             build/hello.exe
             build/test_host/test_host.exe
             build/lxmonika_*.sys
+            build/lxmonika_*.pdb
           if-no-files-found: ignore

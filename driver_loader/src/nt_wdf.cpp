@@ -34,11 +34,10 @@ static NTSTATUS NTAPI impl_WdfVersionBind(PDRIVER_OBJECT driverObject,
         return STATUS_INVALID_PARAMETER;
     }
 
-    // The types in the headers are misleading.
-    // This is what the consumer expects, please do not change.
     bindInfo->FuncCount = kWdfFunctionTableStubCount;
-    if (bindInfo->FuncTable != nullptr) {
-        *bindInfo->FuncTable = (WDFFUNC)(PVOID)s_wdf_function_table_stub.data();
+    bindInfo->Module = driverObject;
+    if (bindInfo->FuncTable == nullptr) {
+        bindInfo->FuncTable = s_wdf_function_table_stub.data();
     }
 
     auto& driver_globals = loader->WdfDriverGlobals();

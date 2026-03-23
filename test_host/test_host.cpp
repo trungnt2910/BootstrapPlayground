@@ -132,12 +132,12 @@ int main(int argc, char* argv[]) {
 
         loader.Load();
         std::println(stderr, "[test_host] Driver loaded at {}.", loader.GetBase());
-        if (GetFileAttributesA(pdb_path) != INVALID_FILE_ATTRIBUTES) {
-            loader.LoadPdb(pdb_path);
-            std::println(stderr, "[test_host] Loaded PDB: {}", pdb_path);
-        } else {
-            std::println(stderr, "[test_host] PDB not found, skipping symbol load: {}", pdb_path);
+        if (GetFileAttributesA(pdb_path) == INVALID_FILE_ATTRIBUTES) {
+            std::println(stderr, "[test_host] FAIL: Required PDB not found: {}", pdb_path);
+            return EXIT_FAILURE;
         }
+        loader.LoadPdb(pdb_path);
+        std::println(stderr, "[test_host] Loaded PDB: {}", pdb_path);
 
         const NTSTATUS status = loader.CallDriverEntry(std::nullopt);
 
