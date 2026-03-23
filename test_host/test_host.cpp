@@ -24,7 +24,7 @@
 
 #include <windows.h>
 
-static std::optional<driver_loader::logging::LogLevel> parse_log_level_arg(const char *arg)
+static std::optional<driver_loader::logging::LogLevel> ParseLogLevelArg(const char *arg)
 {
     if (arg == nullptr)
     {
@@ -46,7 +46,7 @@ static std::optional<driver_loader::logging::LogLevel> parse_log_level_arg(const
     return driver_loader::logging::ParseLogLevel(value, driver_loader::logging::LogLevel::Error);
 }
 
-static LONG WINAPI top_level_exception_filter(EXCEPTION_POINTERS *ep)
+static LONG WINAPI TopLevelExceptionFilter(EXCEPTION_POINTERS *ep)
 {
     if (!ep || !ep->ExceptionRecord)
         return EXCEPTION_CONTINUE_SEARCH;
@@ -99,13 +99,13 @@ extern "C" NTSTATUS NTAPI LxInitialize(PDRIVER_OBJECT /*driverObject*/, PVOID /*
 
 int main(int argc, char *argv[])
 {
-    SetUnhandledExceptionFilter(&top_level_exception_filter);
+    SetUnhandledExceptionFilter(&TopLevelExceptionFilter);
     constexpr std::size_t kDriverPathExtraCapacity = 32;
 
     DriverLoader::InitLogLevelFromEnv();
     for (int i = 1; i < argc; ++i)
     {
-        const auto level = parse_log_level_arg(argv[i]);
+        const auto level = ParseLogLevelArg(argv[i]);
         if (level.has_value())
         {
             DriverLoader::SetLogLevel(*level);

@@ -1,5 +1,10 @@
 // ---- Mm* --------------------------------------------------------------------
 
+
+#include "../include/wdm.hpp"
+#include <iostream>
+#include <print>
+
 static PVOID NTAPI impl_MmGetSystemRoutineAddress(UNICODE_STRING *routineName)
 {
     std::println(stderr, "[nt_stubs] call {}", __func__);
@@ -13,14 +18,14 @@ static PVOID NTAPI impl_MmGetSystemRoutineAddress(UNICODE_STRING *routineName)
     if (len <= 0)
         return nullptr;
     narrow[len] = '\0';
-    void *sym = nt_stubs_lookup(narrow);
+    void *sym = NtStubsLookup(narrow);
     if (sym)
     {
         std::println(stderr, "[nt_stubs] MmGetSystemRoutineAddress({}) -> {:p}", narrow, sym);
         std::flush(std::cerr);
         return sym;
     }
-    void *stub = nt_stubs_allocate(narrow);
+    void *stub = NtStubsAllocate(narrow);
     std::println(stderr, "[nt_stubs] MmGetSystemRoutineAddress({}) unresolved; using stub @ {:p}",
                  narrow, stub);
     std::flush(std::cerr);

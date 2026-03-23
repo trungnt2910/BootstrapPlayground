@@ -1,5 +1,10 @@
 // ---- CRT wrappers -----------------------------------------------------------
 
+
+#include "../include/wdm.hpp"
+#include <iostream>
+#include <print>
+
 static std::size_t impl_strnlen(const char *s, std::size_t n)
 {
     std::println(stderr, "[nt_stubs] call {}", __func__);

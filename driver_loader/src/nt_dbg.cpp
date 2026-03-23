@@ -1,5 +1,10 @@
 // ---- Debug output ----------------------------------------------------------
 
+
+#include "../include/wdm.hpp"
+#include <iostream>
+#include <print>
+
 static ULONG impl_DbgPrint(const char *fmt, ...)
 {
     std::println(stderr, "[nt_stubs] call {}", __func__);

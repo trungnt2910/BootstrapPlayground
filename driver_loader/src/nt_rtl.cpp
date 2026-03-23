@@ -1,5 +1,10 @@
 // ---- Unicode string helpers ------------------------------------------------
 
+
+#include "../include/wdm.hpp"
+#include <iostream>
+#include <print>
+
 static VOID NTAPI impl_RtlInitUnicodeString(UNICODE_STRING *dest, const WCHAR *src)
 {
     std::println(stderr, "[nt_stubs] call {}", __func__);

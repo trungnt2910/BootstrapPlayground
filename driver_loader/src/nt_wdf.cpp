@@ -1,5 +1,14 @@
 // ---- Wdf* -------------------------------------------------------------------
 
+
+#include "../include/driver_loader.hpp"
+#include "../include/wdf.hpp"
+#include "../include/wdm.hpp"
+#include <array>
+#include <iostream>
+#include <print>
+#include <utility>
+
 template <std::size_t Index> static VOID impl_WdfStubTableEntry()
 {
     std::println(stderr, "[nt_stubs] call impl_WdfStubTableEntry{}", Index);
@@ -12,7 +21,7 @@ template <std::size_t... Indices> static auto MakeWdfFunctionTable(std::index_se
 }
 
 static constexpr ULONG kWdfFunctionTableStubCount = 0x1BC;
-static auto s_wdf_function_table_stub =
+static auto s_wdfFunctionTableStub =
     MakeWdfFunctionTable(std::make_index_sequence<kWdfFunctionTableStubCount>{});
 
 static NTSTATUS NTAPI impl_WdfVersionBind(PDRIVER_OBJECT driverObject,
@@ -43,7 +52,7 @@ static NTSTATUS NTAPI impl_WdfVersionBind(PDRIVER_OBJECT driverObject,
     // while others pass a storage slot through the existing FuncTable value.
     // Populate both forms defensively.
     WDFFUNC *funcTableField = bindInfo->FuncTable;
-    bindInfo->FuncTable = s_wdf_function_table_stub.data();
+    bindInfo->FuncTable = s_wdfFunctionTableStub.data();
     if (funcTableField != nullptr && funcTableField != bindInfo->FuncTable)
     {
         __try

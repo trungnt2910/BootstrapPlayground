@@ -21,10 +21,10 @@ extern int next_index;
 
 // Called by every generated stub.  Prints an error and aborts.
 // Marked [[noreturn]] so callers do not need a return statement.
-[[noreturn]] void handle_call(int idx) noexcept;
+[[noreturn]] void HandleCall(int idx) noexcept;
 
 // Returns a pointer to the table of generated stub function pointers.
 // The table is defined in the generated source file.
-const stub_fn_t *get_stub_table() noexcept;
+const stub_fn_t *GetStubTable() noexcept;
 
 } // namespace nt_stubs_internal

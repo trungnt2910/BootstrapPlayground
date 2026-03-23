@@ -1,5 +1,10 @@
 // Intentionally keep truly uncategorized stubs in this file.
 
+
+#include "../include/wdm.hpp"
+#include <iostream>
+#include <print>
+
 static LONG NTAPI impl_InterlockedCompareExchange(volatile LONG *dest, LONG exchange,
                                                   LONG comparand)
 {

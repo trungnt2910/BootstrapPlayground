@@ -13,7 +13,7 @@ string(APPEND _lines "#include \"nt_stubs_internal.hpp\"\n")
 string(APPEND _lines "#include <cstdio>\n")
 string(APPEND _lines "#include <utility>  // std::unreachable\n\n")
 
-set(_table "static const nt_stubs_internal::stub_fn_t s_stub_table[] = {\n")
+set(_table "static const nt_stubs_internal::stub_fn_t s_stubTable[] = {\n")
 
 math(EXPR STUB_SLOT_MAX_INDEX "${STUB_SLOT_COUNT} - 1")
 foreach(i RANGE ${STUB_SLOT_MAX_INDEX})
@@ -22,7 +22,7 @@ foreach(i RANGE ${STUB_SLOT_MAX_INDEX})
         "    volatile int idx = ${i};\n"
         "    std::fprintf(stderr, \"[nt_stubs] stub-enter #%d\\n\", idx);\n"
         "    std::fflush(stderr);\n"
-        "    nt_stubs_internal::handle_call(idx);\n"
+        "    nt_stubs_internal::HandleCall(idx);\n"
         "    std::fprintf(stderr, \"[nt_stubs] stub-exit  #%d -> <unreachable>\\n\", idx);\n"
         "    std::fflush(stderr);\n"
         "    std::unreachable(); }\n"
@@ -34,7 +34,7 @@ string(APPEND _table "};\n\n")
 string(APPEND _lines "${_table}")
 string(APPEND _lines
     "namespace nt_stubs_internal {\n"
-    "const stub_fn_t* get_stub_table() noexcept { return s_stub_table; }\n"
+    "const stub_fn_t* GetStubTable() noexcept { return s_stubTable; }\n"
     "} // namespace nt_stubs_internal\n"
 )
 

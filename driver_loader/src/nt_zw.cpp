@@ -1,5 +1,10 @@
 // ---- Zw* --------------------------------------------------------------------
 
+
+#include "../include/wdm.hpp"
+#include <iostream>
+#include <print>
+
 static NTSTATUS NTAPI impl_ZwClose(HANDLE /*handle*/)
 {
     std::println(stderr, "[nt_stubs] call {}", __func__);

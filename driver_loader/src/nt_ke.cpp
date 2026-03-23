@@ -1,5 +1,10 @@
 // ---- Ke* / Kf* --------------------------------------------------------------
 
+
+#include "../include/wdm.hpp"
+#include <iostream>
+#include <print>
+
 static VOID NTAPI impl_KeInitializeSpinLock(ULONG_PTR *spinLock)
 {
     std::println(stderr, "[nt_stubs] call {}", __func__);

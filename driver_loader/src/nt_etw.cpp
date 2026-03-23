@@ -1,5 +1,10 @@
 // ---- Etw* -------------------------------------------------------------------
 
+
+#include "../include/wdm.hpp"
+#include <iostream>
+#include <print>
+
 static NTSTATUS NTAPI impl_EtwRegister(PVOID /*providerId*/, PVOID /*callback*/, PVOID /*context*/,
                                        PVOID *regHandle)
 {

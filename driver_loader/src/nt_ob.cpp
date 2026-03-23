@@ -1,5 +1,10 @@
 // ---- Reference counting ----------------------------------------------------
 
+
+#include "../include/wdm.hpp"
+#include <iostream>
+#include <print>
+
 static LONG_PTR FASTCALL impl_ObfReferenceObject(PVOID /*object*/)
 {
     std::println(stderr, "[nt_stubs] call {}", __func__);

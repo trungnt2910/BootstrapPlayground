@@ -1,17 +1,11 @@
 // ---- BCrypt* ----------------------------------------------------------------
 
-#include <cstdlib>
+
+#include "../include/wdm.hpp"
 #include <iostream>
 #include <print>
 
-#ifndef NT_STUB_REPORT
-#define NT_STUB_REPORT()                                                                           \
-    do                                                                                             \
-    {                                                                                              \
-        std::println(stderr, "[nt_stubs] call {}", __func__);                                      \
-        std::flush(std::cerr);                                                                     \
-    } while (0)
-#endif
+#include <cstdlib>
 
 static NTSTATUS NTAPI impl_BCryptGenRandom(PVOID alg, UCHAR *buf, ULONG len, ULONG flags)
 {

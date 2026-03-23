@@ -1,5 +1,9 @@
 // ---- MDL operations --------------------------------------------------------
 
+
+#include "../include/wdm.hpp"
+#include <iostream>
+#include <print>
 #include <limits>
 
 static PMDL NTAPI impl_IoAllocateMdl(PVOID /*va*/, ULONG byteCount, BOOLEAN /*secondary*/,
@@ -149,7 +153,7 @@ static PEPROCESS NTAPI impl_IoGetCurrentProcess(VOID)
 {
     std::println(stderr, "[nt_stubs] call {}", __func__);
     std::flush(std::cerr);
-    return &s_fake_eprocess;
+    return &s_fakeEprocess;
 }
 
 static LONG impl___C_specific_handler_fallback(...)

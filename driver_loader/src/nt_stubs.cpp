@@ -25,6 +25,7 @@
 #include <cwctype>
 #include <format>
 #include <iostream>
+#include <limits>
 #include <print>
 #include <string>
 #include <utility>
@@ -39,7 +40,7 @@ namespace nt_stubs_internal
 std::array<const char *, 256> name_table = {};
 int next_index = 0;
 
-[[noreturn]] static void report_and_abort(const char *msg) noexcept
+[[noreturn]] static void ReportAndAbort(const char *msg) noexcept
 {
     if (!msg)
         msg = "[nt_stubs] <null message>\n";
@@ -56,7 +57,7 @@ int next_index = 0;
     std::abort();
 }
 
-[[noreturn]] void handle_call(int idx) noexcept
+[[noreturn]] void HandleCall(int idx) noexcept
 {
     const char *name = (idx >= 0 && idx < 256 && name_table[static_cast<std::size_t>(idx)])
                            ? name_table[static_cast<std::size_t>(idx)]
@@ -72,7 +73,7 @@ int next_index = 0;
         "[nt_stubs] handle_call-exit  #{} result=<abort> reason=unimplemented symbol={}\n"
         "[nt_stubs] Unimplemented ntoskrnl function called: {} (stub #{})",
         idx, name, name, idx);
-    report_and_abort(buf.c_str());
+    ReportAndAbort(buf.c_str());
 }
 
 } // namespace nt_stubs_internal
@@ -81,9 +82,9 @@ int next_index = 0;
 // Fallback stub – used when all 256 numbered slots are exhausted.
 // ---------------------------------------------------------------------------
 
-static void *fallback_stub() noexcept
+static void *FallbackStub() noexcept
 {
-    nt_stubs_internal::report_and_abort(
+    nt_stubs_internal::ReportAndAbort(
         "[nt_stubs] An ntoskrnl stub was called but all 256 stub slots are "
         "exhausted.\n");
 }
@@ -94,7 +95,7 @@ static void *fallback_stub() noexcept
 // 256 slots are taken.
 // ---------------------------------------------------------------------------
 
-void *nt_stubs_allocate(const char *name) noexcept
+void *NtStubsAllocate(const char *name) noexcept
 {
     using namespace nt_stubs_internal;
     if (next_index >= 256)
@@ -103,10 +104,10 @@ void *nt_stubs_allocate(const char *name) noexcept
             stderr,
             "[nt_stubs] Warning: more than 256 stubs requested; '{}' will use the fallback stub.",
             name ? name : "<null>");
-        return reinterpret_cast<void *>(&fallback_stub);
+        return reinterpret_cast<void *>(&FallbackStub);
     }
     name_table[static_cast<std::size_t>(next_index)] = name;
-    void *ptr = reinterpret_cast<void *>(nt_stubs_internal::get_stub_table()[next_index]);
+    void *ptr = reinterpret_cast<void *>(nt_stubs_internal::GetStubTable()[next_index]);
     ++next_index;
     return ptr;
 }
@@ -119,21 +120,21 @@ void *nt_stubs_allocate(const char *name) noexcept
 // the symbol table so the driver's *__imp_Var dereference gives our value.
 // ---------------------------------------------------------------------------
 
-static ULONG_PTR s_fake_object_type_proc = 1;
-static ULONG_PTR s_fake_object_type_thr = 1;
-static ULONG_PTR s_fake_object_type_dev = 1;
-static PVOID s_PsProcessType = &s_fake_object_type_proc;
-static PVOID s_PsThreadType = &s_fake_object_type_thr;
-static PVOID s_IoDeviceObjectType = &s_fake_object_type_dev;
-static EPROCESS s_fake_eprocess = {};
-static PEPROCESS s_PsInitialSystemProcess = &s_fake_eprocess;
-static SE_EXPORTS s_se_exports_buf = {};
-static PSE_EXPORTS s_SeExports = &s_se_exports_buf;
+static ULONG_PTR s_fakeObjectTypeProc = 1;
+static ULONG_PTR s_fakeObjectTypeThr = 1;
+static ULONG_PTR s_fakeObjectTypeDev = 1;
+static PVOID s_psProcessType = &s_fakeObjectTypeProc;
+static PVOID s_psThreadType = &s_fakeObjectTypeThr;
+static PVOID s_ioDeviceObjectType = &s_fakeObjectTypeDev;
+static EPROCESS s_fakeEprocess = {};
+static PEPROCESS s_psInitialSystemProcess = &s_fakeEprocess;
+static SE_EXPORTS s_seExportsBuf = {};
+static PSE_EXPORTS s_seExports = &s_seExportsBuf;
 
 // ---------------------------------------------------------------------------
 // Built-in symbol table
 //
-// Consulted by nt_stubs_lookup() for ALL imported DLLs (ntoskrnl, hal,
+// Consulted by NtStubsLookup() for ALL imported DLLs (ntoskrnl, hal,
 // wdfldr, cng, etc.).  Function names are unique across kernel DLLs so a
 // single flat table is safe.
 // ---------------------------------------------------------------------------
@@ -359,7 +360,7 @@ struct NtSymbol
         #sym, reinterpret_cast<void *>(&s_##sym)                                                   \
     }
 
-static const NtSymbol s_nt_symbols[] = {
+static const NtSymbol s_ntSymbols[] = {
     // ---- Debug output -------------------------------------------------------
     NT_SYM(DbgPrint),
     NT_SYM(DbgPrintEx),
@@ -508,12 +509,12 @@ static const NtSymbol s_nt_symbols[] = {
 #undef NT_VAR
 
 // ---------------------------------------------------------------------------
-// nt_stubs_lookup – consulted for ALL imported DLLs.
+// NtStubsLookup – consulted for ALL imported DLLs.
 // Special-cases a few SEH/unwind helpers that must resolve to the real
 // implementations in ntdll.dll / msvcrt.dll.
 // ---------------------------------------------------------------------------
 
-void *nt_stubs_lookup(const char *name) noexcept
+void *NtStubsLookup(const char *name) noexcept
 {
     if (!name)
         return nullptr;
@@ -590,7 +591,7 @@ void *nt_stubs_lookup(const char *name) noexcept
         }
     }
 
-    for (const auto &sym : s_nt_symbols)
+    for (const auto &sym : s_ntSymbols)
     {
         if (std::strcmp(sym.name, name) == 0)
         {
@@ -603,9 +604,9 @@ void *nt_stubs_lookup(const char *name) noexcept
 }
 
 // Backward-compatibility alias (used internally by MmGetSystemRoutineAddress).
-void *nt_stubs_lookup_ntoskrnl(const char *name) noexcept
+void *NtStubsLookupNtoskrnl(const char *name) noexcept
 {
-    return nt_stubs_lookup(name);
+    return NtStubsLookup(name);
 }
 
 // ---------------------------------------------------------------------------

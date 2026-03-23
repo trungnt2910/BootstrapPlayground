@@ -108,7 +108,7 @@ class DriverLoader
     // Default: derived from the loaded .sys file stem (without extension).
     [[nodiscard]] const std::wstring &GetDriverName() const noexcept
     {
-        return m_driver_name;
+        return m_driverName;
     }
     void SetDriverName(std::wstring name);
 
@@ -119,23 +119,23 @@ class DriverLoader
     // Returns a reference to the synthetic DRIVER_OBJECT passed to DriverEntry.
     [[nodiscard]] DRIVER_OBJECT &DriverObject() noexcept
     {
-        return m_driver_object;
+        return m_driverObject;
     }
     [[nodiscard]] const DRIVER_OBJECT &DriverObject() const noexcept
     {
-        return m_driver_object;
+        return m_driverObject;
     }
 
     // Convenience: first registered device object (may be null).
     [[nodiscard]] PDEVICE_OBJECT DeviceObject() const noexcept
     {
-        return m_driver_object.DeviceObject;
+        return m_driverObject.DeviceObject;
     }
 
     // Convenience: the driver's unload callback (may be null).
     [[nodiscard]] PDRIVER_UNLOAD DriverUnload() const noexcept
     {
-        return m_driver_object.DriverUnload;
+        return m_driverObject.DriverUnload;
     }
 
     // Convenience: one of the driver's IRP dispatch routines.
@@ -144,7 +144,7 @@ class DriverLoader
     {
         if (index < 0 || index > IRP_MJ_MAXIMUM_FUNCTION)
             return nullptr;
-        return m_driver_object.MajorFunction[index];
+        return m_driverObject.MajorFunction[index];
     }
 
     // -----------------------------------------------------------------------
@@ -193,15 +193,15 @@ class DriverLoader
     }
     [[nodiscard]] std::size_t GetImageSize() const noexcept
     {
-        return m_image_size;
+        return m_imageSize;
     }
     [[nodiscard]] bool HasLoadedDebugSymbols() const noexcept
     {
-        return m_dbghelp_attached && m_dbghelp_module_base != 0;
+        return m_dbghelpAttached && m_dbghelpModuleBase != 0;
     }
     [[nodiscard]] WDF_DRIVER_GLOBALS &WdfDriverGlobals() noexcept
     {
-        return m_wdf_driver_globals;
+        return m_wdfDriverGlobals;
     }
     [[nodiscard]] static DriverLoader *
     FromDriverObject(const DRIVER_OBJECT *driver_object) noexcept;
@@ -212,7 +212,7 @@ class DriverLoader
     // ------------------------------------------------------------------
 
     // Resolve a single import.  Checks (in order):
-    //   1. Consumer-supplied overrides (m_extra_symbols).
+    //   1. Consumer-supplied overrides (m_extraSymbols).
     //   2. Built-in ntoskrnl implementations.
     //   3. Next available numbered stub (recorded in the stub table).
     // For non-ntoskrnl DLLs the built-in table is not consulted, so the
@@ -233,30 +233,30 @@ class DriverLoader
     std::string m_path;
 
     // Consumer-supplied symbol overrides.
-    std::unordered_map<std::string, void *> m_extra_symbols;
+    std::unordered_map<std::string, void *> m_extraSymbols;
 
     // Mapped image.
     void *m_base = nullptr;
-    std::size_t m_image_size = 0;
+    std::size_t m_imageSize = 0;
 
     // Synthetic driver state.
-    DRIVER_OBJECT m_driver_object = {};
-    DRIVER_EXTENSION m_driver_extension = {};
-    UNICODE_STRING m_driver_name_str = {};
-    UNICODE_STRING m_registry_path_str = {};
+    DRIVER_OBJECT m_driverObject = {};
+    DRIVER_EXTENSION m_driverExtension = {};
+    UNICODE_STRING m_driverNameStr = {};
+    UNICODE_STRING m_registryPathStr = {};
 
     // Driver service name storage.
-    std::wstring m_driver_name;
-    std::wstring m_driver_name_nt_buf;
+    std::wstring m_driverName;
+    std::wstring m_driverNameNtBuf;
     // Storage for the registry-path wide string (set at CallDriverEntry time).
-    std::wstring m_registry_path_buf;
+    std::wstring m_registryPathBuf;
 
     // Per-instance DbgHelp symbol state (managed by LoadPdb/destructor).
-    bool m_dbghelp_attached = false;
-    std::uint64_t m_dbghelp_module_base = 0;
+    bool m_dbghelpAttached = false;
+    std::uint64_t m_dbghelpModuleBase = 0;
 
-    WDF_DRIVER_GLOBALS m_wdf_driver_globals = {};
+    WDF_DRIVER_GLOBALS m_wdfDriverGlobals = {};
 
-    static std::unordered_map<const DRIVER_OBJECT *, DriverLoader *> s_driver_object_map;
-    static std::mutex s_driver_object_map_mutex;
+    static std::unordered_map<const DRIVER_OBJECT *, DriverLoader *> s_driverObjectMap;
+    static std::mutex s_driverObjectMapMutex;
 };

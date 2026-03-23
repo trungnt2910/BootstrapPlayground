@@ -1,5 +1,10 @@
 // ---- Ex* --------------------------------------------------------------------
 
+
+#include "../include/wdm.hpp"
+#include <iostream>
+#include <print>
+
 static PVOID NTAPI impl_ExAllocatePoolWithTag(ULONG /*poolType*/, SIZE_T numberOfBytes,
                                               ULONG /*tag*/)
 {

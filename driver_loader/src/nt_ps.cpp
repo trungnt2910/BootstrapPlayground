@@ -1,5 +1,10 @@
 // ---- Ps* --------------------------------------------------------------------
 
+
+#include "../include/wdm.hpp"
+#include <iostream>
+#include <print>
+
 static NTSTATUS NTAPI impl_PsRegisterPicoProvider(PVOID /*provider*/, PVOID /*routines*/)
 {
     std::println(stderr, "[nt_stubs] call {}", __func__);
