@@ -1,16 +1,14 @@
 // ---- Wdf* -------------------------------------------------------------------
 
-template<std::size_t Index>
-static VOID impl_WdfStubTableEntry() {
+template <std::size_t Index> static VOID impl_WdfStubTableEntry()
+{
     std::println(stderr, "[nt_stubs] call impl_WdfStubTableEntry{}", Index);
     std::flush(std::cerr);
 }
 
-template<std::size_t... Indices>
-static auto MakeWdfFunctionTable(std::index_sequence<Indices...>) {
-    return std::array<WDFFUNC, sizeof...(Indices)>{
-        &impl_WdfStubTableEntry<Indices>...
-    };
+template <std::size_t... Indices> static auto MakeWdfFunctionTable(std::index_sequence<Indices...>)
+{
+    return std::array<WDFFUNC, sizeof...(Indices)>{&impl_WdfStubTableEntry<Indices>...};
 }
 
 static constexpr ULONG kWdfFunctionTableStubCount = 0x1BC;
@@ -18,19 +16,23 @@ static auto s_wdf_function_table_stub =
     MakeWdfFunctionTable(std::make_index_sequence<kWdfFunctionTableStubCount>{});
 
 static NTSTATUS NTAPI impl_WdfVersionBind(PDRIVER_OBJECT driverObject,
-                        PUNICODE_STRING /*registryPath*/, PWDF_BIND_INFO bindInfo,
-                        PWDF_COMPONENT_GLOBALS* componentGlobals) {
+                                          PUNICODE_STRING /*registryPath*/, PWDF_BIND_INFO bindInfo,
+                                          PWDF_COMPONENT_GLOBALS *componentGlobals)
+{
     std::println(stderr, "[nt_stubs] call {}", __func__);
     std::flush(std::cerr);
-    if (!bindInfo || !componentGlobals) {
+    if (!bindInfo || !componentGlobals)
+    {
         return STATUS_INVALID_PARAMETER;
     }
-    if (bindInfo->Size < sizeof(WDF_BIND_INFO)) {
+    if (bindInfo->Size < sizeof(WDF_BIND_INFO))
+    {
         return STATUS_INVALID_PARAMETER;
     }
 
-    DriverLoader* loader = DriverLoader::FromDriverObject(driverObject);
-    if (!loader) {
+    DriverLoader *loader = DriverLoader::FromDriverObject(driverObject);
+    if (!loader)
+    {
         return STATUS_INVALID_PARAMETER;
     }
 
@@ -40,59 +42,65 @@ static NTSTATUS NTAPI impl_WdfVersionBind(PDRIVER_OBJECT driverObject,
     // Some consumers treat FuncTable as the function-table pointer directly,
     // while others pass a storage slot through the existing FuncTable value.
     // Populate both forms defensively.
-    WDFFUNC* funcTableField = bindInfo->FuncTable;
+    WDFFUNC *funcTableField = bindInfo->FuncTable;
     bindInfo->FuncTable = s_wdf_function_table_stub.data();
-    if (funcTableField != nullptr && funcTableField != bindInfo->FuncTable) {
-        __try {
+    if (funcTableField != nullptr && funcTableField != bindInfo->FuncTable)
+    {
+        __try
+        {
             *funcTableField = (WDFFUNC)(PVOID)bindInfo->FuncTable;
-        } __except (EXCEPTION_EXECUTE_HANDLER) {
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
         }
     }
 
-    auto& driver_globals = loader->WdfDriverGlobals();
+    auto &driver_globals = loader->WdfDriverGlobals();
     driver_globals.Driver = driverObject;
     driver_globals.DriverFlags = 0;
     driver_globals.DisplaceDriverUnload = 0;
 
     *componentGlobals = nullptr;
-    std::println(stderr,
-        "[nt_stubs] {}: FuncTable={:p} FuncCount={} ComponentGlobals={:p}",
-        __func__,
-        static_cast<void*>(bindInfo->FuncTable),
-        static_cast<unsigned long>(bindInfo->FuncCount),
-        static_cast<void*>(*componentGlobals));
+    std::println(stderr, "[nt_stubs] {}: FuncTable={:p} FuncCount={} ComponentGlobals={:p}",
+                 __func__, static_cast<void *>(bindInfo->FuncTable),
+                 static_cast<unsigned long>(bindInfo->FuncCount),
+                 static_cast<void *>(*componentGlobals));
     std::flush(std::cerr);
     return STATUS_SUCCESS;
 }
 
-static NTSTATUS NTAPI impl_WdfVersionBindClass(PVOID context,
-                        PWDF_BIND_INFO bindInfo, PWDF_COMPONENT_GLOBALS* componentGlobals) {
+static NTSTATUS NTAPI impl_WdfVersionBindClass(PVOID context, PWDF_BIND_INFO bindInfo,
+                                               PWDF_COMPONENT_GLOBALS *componentGlobals)
+{
     std::println(stderr, "[nt_stubs] call {}", __func__);
     std::flush(std::cerr);
-    if (!context) {
+    if (!context)
+    {
         return STATUS_INVALID_PARAMETER;
     }
-    auto* driverObject = static_cast<PDRIVER_OBJECT>(context);
+    auto *driverObject = static_cast<PDRIVER_OBJECT>(context);
     return impl_WdfVersionBind(driverObject, nullptr, bindInfo, componentGlobals);
 }
 
 static VOID NTAPI impl_WdfVersionUnbind(PUNICODE_STRING /*registryPath*/,
-                                          PWDF_BIND_INFO /*bindInfo*/,
-                                          PWDF_COMPONENT_GLOBALS componentGlobals) {
+                                        PWDF_BIND_INFO /*bindInfo*/,
+                                        PWDF_COMPONENT_GLOBALS componentGlobals)
+{
     std::println(stderr, "[nt_stubs] call {}", __func__);
     std::flush(std::cerr);
     (void)componentGlobals;
 }
 
-static VOID NTAPI impl_WdfVersionUnbindClass(PVOID /*context*/,
-                                               PWDF_BIND_INFO bindInfo,
-                                               PWDF_COMPONENT_GLOBALS componentGlobals) {
+static VOID NTAPI impl_WdfVersionUnbindClass(PVOID /*context*/, PWDF_BIND_INFO bindInfo,
+                                             PWDF_COMPONENT_GLOBALS componentGlobals)
+{
     std::println(stderr, "[nt_stubs] call {}", __func__);
     std::flush(std::cerr);
     impl_WdfVersionUnbind(nullptr, bindInfo, componentGlobals);
 }
 
-static NTSTATUS NTAPI impl_WdfLdrQueryInterface(PVOID /*iface*/) {
+static NTSTATUS NTAPI impl_WdfLdrQueryInterface(PVOID /*iface*/)
+{
     std::println(stderr, "[nt_stubs] call {}", __func__);
     std::flush(std::cerr);
     return STATUS_SUCCESS;

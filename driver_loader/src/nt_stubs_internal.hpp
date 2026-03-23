@@ -7,13 +7,14 @@
 #include <array>
 #include <cstddef>
 
-namespace nt_stubs_internal {
+namespace nt_stubs_internal
+{
 
 // Function pointer type for the generated stubs.
-using stub_fn_t = void* (*)() noexcept;
+using stub_fn_t = void *(*)() noexcept;
 
 // Per-stub name storage (populated at load time by DriverLoader).
-extern std::array<const char*, 256> name_table;
+extern std::array<const char *, 256> name_table;
 
 // Next available stub index.
 extern int next_index;
@@ -24,6 +25,6 @@ extern int next_index;
 
 // Returns a pointer to the table of generated stub function pointers.
 // The table is defined in the generated source file.
-const stub_fn_t* get_stub_table() noexcept;
+const stub_fn_t *get_stub_table() noexcept;
 
 } // namespace nt_stubs_internal
