@@ -76,6 +76,7 @@ extern "C" NTSTATUS NTAPI LxInitialize(PDRIVER_OBJECT /*driverObject*/,
 
 int main(int argc, char* argv[]) {
     SetUnhandledExceptionFilter(&top_level_exception_filter);
+    constexpr std::size_t kDriverPathExtraCapacity = 32;
 
     // Build the driver path using only C-style string operations so that
     // no heap allocation (std::string) is needed before the try block.
@@ -108,12 +109,14 @@ int main(int argc, char* argv[]) {
 
     std::println(stderr, "[test_host] Loading driver: {}", path_cstr);
 
-    static char pdb_path[MAX_PATH + 32];
+    static char pdb_path[MAX_PATH + kDriverPathExtraCapacity];
     std::strncpy(pdb_path, path_cstr, sizeof(pdb_path) - 1);
     pdb_path[sizeof(pdb_path) - 1] = '\0';
     char* pdb_ext = std::strrchr(pdb_path, '.');
     if (pdb_ext != nullptr) {
-        std::strcpy(pdb_ext, ".pdb");
+        if (static_cast<std::size_t>(&pdb_path[sizeof(pdb_path)] - pdb_ext) >= 5) {
+            std::memcpy(pdb_ext, ".pdb", 5);
+        }
     }
 
     try {
