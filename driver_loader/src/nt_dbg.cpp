@@ -1,13 +1,12 @@
 // ---- Debug output ----------------------------------------------------------
 
-
 #include "../include/wdm.hpp"
 #include <iostream>
 #include <print>
 
 static ULONG impl_DbgPrint(const char *fmt, ...)
 {
-    std::println(stderr, "[nt_stubs] call {}", __func__);
+    NT_STUB_REPORT();
     std::flush(std::cerr);
     std::va_list args;
     va_start(args, fmt);
@@ -18,7 +17,7 @@ static ULONG impl_DbgPrint(const char *fmt, ...)
 
 static ULONG impl_DbgPrintEx(ULONG /*componentId*/, ULONG /*level*/, const char *fmt, ...)
 {
-    std::println(stderr, "[nt_stubs] call {}", __func__);
+    NT_STUB_REPORT();
     std::flush(std::cerr);
     std::va_list args;
     va_start(args, fmt);

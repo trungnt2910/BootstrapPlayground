@@ -62,7 +62,7 @@ typedef unsigned char BYTE;
 
 #ifndef _UNICODE_STRING_DEFINED
 #define _UNICODE_STRING_DEFINED
-typedef struct _UNICODE_STRING
+typedef struct UNICODE_STRING
 {
     USHORT Length;
     USHORT MaximumLength;
@@ -147,35 +147,35 @@ inline bool NT_SUCCESS(NTSTATUS st) noexcept
 // ---------------------------------------------------------------------------
 
 #ifndef IRP_MJ_CREATE
-#define IRP_MJ_CREATE 0
-#define IRP_MJ_CREATE_NAMED_PIPE 1
-#define IRP_MJ_CLOSE 2
-#define IRP_MJ_READ 3
-#define IRP_MJ_WRITE 4
-#define IRP_MJ_QUERY_INFORMATION 5
-#define IRP_MJ_SET_INFORMATION 6
-#define IRP_MJ_QUERY_EA 7
-#define IRP_MJ_SET_EA 8
-#define IRP_MJ_FLUSH_BUFFERS 9
+#define IRP_MJ_CREATE                   0
+#define IRP_MJ_CREATE_NAMED_PIPE        1
+#define IRP_MJ_CLOSE                    2
+#define IRP_MJ_READ                     3
+#define IRP_MJ_WRITE                    4
+#define IRP_MJ_QUERY_INFORMATION        5
+#define IRP_MJ_SET_INFORMATION          6
+#define IRP_MJ_QUERY_EA                 7
+#define IRP_MJ_SET_EA                   8
+#define IRP_MJ_FLUSH_BUFFERS            9
 #define IRP_MJ_QUERY_VOLUME_INFORMATION 10
-#define IRP_MJ_SET_VOLUME_INFORMATION 11
-#define IRP_MJ_DIRECTORY_CONTROL 12
-#define IRP_MJ_FILE_SYSTEM_CONTROL 13
-#define IRP_MJ_DEVICE_CONTROL 14
-#define IRP_MJ_INTERNAL_DEVICE_CONTROL 15
-#define IRP_MJ_SHUTDOWN 16
-#define IRP_MJ_LOCK_CONTROL 17
-#define IRP_MJ_CLEANUP 18
-#define IRP_MJ_CREATE_MAILSLOT 19
-#define IRP_MJ_QUERY_SECURITY 20
-#define IRP_MJ_SET_SECURITY 21
-#define IRP_MJ_POWER 22
-#define IRP_MJ_SYSTEM_CONTROL 23
-#define IRP_MJ_DEVICE_CHANGE 24
-#define IRP_MJ_QUERY_QUOTA 25
-#define IRP_MJ_SET_QUOTA 26
-#define IRP_MJ_PNP 27
-#define IRP_MJ_MAXIMUM_FUNCTION 27
+#define IRP_MJ_SET_VOLUME_INFORMATION   11
+#define IRP_MJ_DIRECTORY_CONTROL        12
+#define IRP_MJ_FILE_SYSTEM_CONTROL      13
+#define IRP_MJ_DEVICE_CONTROL           14
+#define IRP_MJ_INTERNAL_DEVICE_CONTROL  15
+#define IRP_MJ_SHUTDOWN                 16
+#define IRP_MJ_LOCK_CONTROL             17
+#define IRP_MJ_CLEANUP                  18
+#define IRP_MJ_CREATE_MAILSLOT          19
+#define IRP_MJ_QUERY_SECURITY           20
+#define IRP_MJ_SET_SECURITY             21
+#define IRP_MJ_POWER                    22
+#define IRP_MJ_SYSTEM_CONTROL           23
+#define IRP_MJ_DEVICE_CHANGE            24
+#define IRP_MJ_QUERY_QUOTA              25
+#define IRP_MJ_SET_QUOTA                26
+#define IRP_MJ_PNP                      27
+#define IRP_MJ_MAXIMUM_FUNCTION         27
 #endif
 
 // Literal constant – does not rely on any macro name.
@@ -187,12 +187,12 @@ inline bool NT_SUCCESS(NTSTATUS st) noexcept
 
 #ifndef _DRIVER_OBJECT_DEFINED
 #define _DRIVER_OBJECT_DEFINED
-struct _DRIVER_OBJECT;
+struct DRIVER_OBJECT;
 #endif
 
 #ifndef _DEVICE_OBJECT_DEFINED
 #define _DEVICE_OBJECT_DEFINED
-struct _DEVICE_OBJECT;
+struct DEVICE_OBJECT;
 #endif
 
 #ifndef _IRP_DEFINED
@@ -200,10 +200,10 @@ struct _DEVICE_OBJECT;
 struct _IRP;
 #endif
 
-typedef struct _DRIVER_OBJECT DRIVER_OBJECT;
-typedef struct _DRIVER_OBJECT *PDRIVER_OBJECT;
-typedef struct _DEVICE_OBJECT DEVICE_OBJECT;
-typedef struct _DEVICE_OBJECT *PDEVICE_OBJECT;
+typedef struct DRIVER_OBJECT DRIVER_OBJECT;
+typedef struct DRIVER_OBJECT *PDRIVER_OBJECT;
+typedef struct DEVICE_OBJECT DEVICE_OBJECT;
+typedef struct DEVICE_OBJECT *PDEVICE_OBJECT;
 typedef struct _IRP IRP;
 typedef struct _IRP *PIRP;
 
@@ -213,14 +213,14 @@ typedef struct _IRP *PIRP;
 
 typedef void(NTAPI *PDRIVER_UNLOAD)(DRIVER_OBJECT *DriverObject);
 typedef NTSTATUS(NTAPI *PDRIVER_DISPATCH)(DEVICE_OBJECT *DeviceObject, IRP *Irp);
-typedef NTSTATUS(NTAPI *PDRIVER_INITIALIZE)(DRIVER_OBJECT *DriverObject,
-                                            UNICODE_STRING *RegistryPath);
+typedef NTSTATUS(NTAPI *PDRIVER_INITIALIZE)(
+    DRIVER_OBJECT *DriverObject, UNICODE_STRING *RegistryPath);
 
 // ---------------------------------------------------------------------------
 // DRIVER_EXTENSION
 // ---------------------------------------------------------------------------
 
-typedef struct _DRIVER_EXTENSION
+typedef struct DRIVER_EXTENSION
 {
     DRIVER_OBJECT *DriverObject;
     void *AddDevice; // PDRIVER_ADD_DEVICE
@@ -232,7 +232,7 @@ typedef struct _DRIVER_EXTENSION
 // DRIVER_OBJECT  (full definition)
 // ---------------------------------------------------------------------------
 
-struct _DRIVER_OBJECT
+struct DRIVER_OBJECT
 {
     SHORT Type; // = 4 (IO_TYPE_DRIVER)
     SHORT Size; // = sizeof(DRIVER_OBJECT)
@@ -255,7 +255,7 @@ struct _DRIVER_OBJECT
 // DEVICE_OBJECT  (minimal subset)
 // ---------------------------------------------------------------------------
 
-struct _DEVICE_OBJECT
+struct DEVICE_OBJECT
 {
     SHORT Type; // = 3 (IO_TYPE_DEVICE)
     USHORT Size;
@@ -277,8 +277,8 @@ struct _DEVICE_OBJECT
 // Pool flags (POOL_FLAGS = ULONGLONG in the Windows SDK)
 // ---------------------------------------------------------------------------
 
-#define POOL_FLAG_NON_PAGED ((ULONGLONG)0x0000000000000004ULL)
-#define POOL_FLAG_PAGED ((ULONGLONG)0x0000000000000008ULL)
+#define POOL_FLAG_NON_PAGED         ((ULONGLONG)0x0000000000000004ULL)
+#define POOL_FLAG_PAGED             ((ULONGLONG)0x0000000000000008ULL)
 #define POOL_FLAG_NON_PAGED_EXECUTE ((ULONGLONG)0x0000000000000010ULL)
 
 // ---------------------------------------------------------------------------
@@ -291,8 +291,8 @@ typedef UCHAR KIRQL;
 typedef KIRQL *PKIRQL;
 #endif
 
-#define PASSIVE_LEVEL 0
-#define APC_LEVEL 1
+#define PASSIVE_LEVEL  0
+#define APC_LEVEL      1
 #define DISPATCH_LEVEL 2
 
 // ---------------------------------------------------------------------------
@@ -301,32 +301,32 @@ typedef KIRQL *PKIRQL;
 
 #ifndef _EPROCESS_DEFINED
 #define _EPROCESS_DEFINED
-struct _EPROCESS
+struct EPROCESS
 {
     ULONG_PTR Reserved;
 };
-typedef struct _EPROCESS EPROCESS;
-typedef struct _EPROCESS *PEPROCESS;
+typedef struct EPROCESS EPROCESS;
+typedef struct EPROCESS *PEPROCESS;
 #endif
 
 #ifndef _ETHREAD_DEFINED
 #define _ETHREAD_DEFINED
-struct _ETHREAD
+struct ETHREAD
 {
     ULONG_PTR Reserved;
 };
-typedef struct _ETHREAD ETHREAD;
-typedef struct _ETHREAD *PETHREAD;
+typedef struct ETHREAD ETHREAD;
+typedef struct ETHREAD *PETHREAD;
 #endif
 
 #ifndef _KTHREAD_DEFINED
 #define _KTHREAD_DEFINED
-struct _KTHREAD
+struct KTHREAD
 {
     ULONG_PTR Reserved;
 };
-typedef struct _KTHREAD KTHREAD;
-typedef struct _KTHREAD *PKTHREAD;
+typedef struct KTHREAD KTHREAD;
+typedef struct KTHREAD *PKTHREAD;
 #endif
 
 // ---------------------------------------------------------------------------
@@ -335,7 +335,7 @@ typedef struct _KTHREAD *PKTHREAD;
 
 #ifndef _MDL_DEFINED
 #define _MDL_DEFINED
-typedef struct _MDL
+typedef struct MDL
 {
     UCHAR Reserved[128];
 } MDL, *PMDL;
@@ -347,7 +347,7 @@ typedef struct _MDL
 
 #ifndef _KEVENT_DEFINED
 #define _KEVENT_DEFINED
-typedef struct _KEVENT
+typedef struct KEVENT
 {
     LONG Signaled;
 } KEVENT, *PKEVENT;
@@ -359,7 +359,7 @@ typedef struct _KEVENT
 
 #ifndef _FAST_MUTEX_DEFINED
 #define _FAST_MUTEX_DEFINED
-typedef struct _FAST_MUTEX
+typedef struct FAST_MUTEX
 {
     LONG Count;
     PVOID Owner;
@@ -375,7 +375,7 @@ typedef struct _FAST_MUTEX
 
 #ifndef _SE_EXPORTS_DEFINED
 #define _SE_EXPORTS_DEFINED
-typedef struct _SE_EXPORTS
+typedef struct SE_EXPORTS
 {
     UCHAR _opaque[1024];
 } SE_EXPORTS, *PSE_EXPORTS;

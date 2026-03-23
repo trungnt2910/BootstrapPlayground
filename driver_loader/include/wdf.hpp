@@ -1,5 +1,7 @@
 #pragma once
 
+#include <Windows.h>
+
 #include "wdm.hpp"
 
 // Minimal WDF declarations used by wdfldr-related stubs.

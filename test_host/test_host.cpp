@@ -60,13 +60,15 @@ static LONG WINAPI TopLevelExceptionFilter(EXCEPTION_POINTERS *ep)
         access_addr = er->ExceptionInformation[1];
     }
 
-    std::println(stderr,
-                 "[test_host] SEH: code=0x{:08X} address={:p} flags=0x{:08X} "
-                 "access_type={} access_addr={:p}",
-                 static_cast<unsigned long>(er->ExceptionCode), er->ExceptionAddress,
-                 static_cast<unsigned long>(er->ExceptionFlags),
-                 static_cast<unsigned long long>(access_type),
-                 reinterpret_cast<void *>(access_addr));
+    std::println(
+        stderr,
+        "[test_host] SEH: code=0x{:08X} address={:p} flags=0x{:08X} "
+        "access_type={} access_addr={:p}",
+        static_cast<unsigned long>(er->ExceptionCode),
+        er->ExceptionAddress,
+        static_cast<unsigned long>(er->ExceptionFlags),
+        static_cast<unsigned long long>(access_type),
+        reinterpret_cast<void *>(access_addr));
     return EXCEPTION_CONTINUE_SEARCH;
 }
 
@@ -80,7 +82,7 @@ static LONG WINAPI TopLevelExceptionFilter(EXCEPTION_POINTERS *ep)
 #elif defined(__arm__) || defined(_M_ARM)
 #define LXMONIKA_SYS "lxmonika_arm.sys"
 #else
-#error "Unknown target architecture – cannot select lxmonika driver"
+#error "Unknown target architecture - cannot select lxmonika driver"
 #endif
 
 // ---------------------------------------------------------------------------
@@ -155,8 +157,8 @@ int main(int argc, char *argv[])
         {
             default_path[0] = '\0';
         }
-        std::strncat(default_path, LXMONIKA_SYS,
-                     sizeof(default_path) - std::strlen(default_path) - 1);
+        std::strncat(
+            default_path, LXMONIKA_SYS, sizeof(default_path) - std::strlen(default_path) - 1);
         path_cstr = default_path;
     }
 
@@ -199,16 +201,18 @@ int main(int argc, char *argv[])
 
         if (status != STATUS_NOT_SUPPORTED)
         {
-            std::println(stderr,
-                         "[test_host] FAIL: DriverEntry returned 0x{:08X}, expected "
-                         "STATUS_NOT_SUPPORTED (0x{:08X})",
-                         static_cast<unsigned long>(status),
-                         static_cast<unsigned long>(STATUS_NOT_SUPPORTED));
+            std::println(
+                stderr,
+                "[test_host] FAIL: DriverEntry returned 0x{:08X}, expected "
+                "STATUS_NOT_SUPPORTED (0x{:08X})",
+                static_cast<unsigned long>(status),
+                static_cast<unsigned long>(STATUS_NOT_SUPPORTED));
             return EXIT_FAILURE;
         }
 
         std::println(
-            stderr, "[test_host] DriverEntry returned STATUS_NOT_SUPPORTED (0x{:08X}) as expected.",
+            stderr,
+            "[test_host] DriverEntry returned STATUS_NOT_SUPPORTED (0x{:08X}) as expected.",
             static_cast<unsigned long>(status));
 
         std::println("[test_host] PASS");

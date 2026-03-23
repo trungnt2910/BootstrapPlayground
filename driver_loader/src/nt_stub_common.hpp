@@ -9,7 +9,7 @@
 #define NT_STUB_REPORT()                                                                           \
     do                                                                                             \
     {                                                                                              \
-        std::println(stderr, "[nt_stubs] call {}", __func__);                                      \
+        NT_STUB_REPORT();                                      \
         std::flush(std::cerr);                                                                     \
     } while (0)
 #endif

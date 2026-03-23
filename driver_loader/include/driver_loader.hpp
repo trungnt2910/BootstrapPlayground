@@ -176,8 +176,8 @@ class DriverLoader
     // Find a loaded debug symbol range [start, end) from DbgHelp.
     // Returns true when a valid range is found. On failure, returns false and
     // zeroes both output values.
-    [[nodiscard]] bool GetDebugSymbolRange(const std::string &name, std::uintptr_t &start,
-                                           std::uintptr_t &endExclusive) const;
+    [[nodiscard]] bool GetDebugSymbolRange(
+        const std::string &name, std::uintptr_t &start, std::uintptr_t &endExclusive) const;
     [[nodiscard]] std::optional<std::pair<std::uintptr_t, std::uintptr_t>>
     TryGetDebugSymbolRange(const std::string &name) const;
 

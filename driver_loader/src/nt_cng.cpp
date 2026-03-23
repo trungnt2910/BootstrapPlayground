@@ -1,11 +1,12 @@
 // ---- BCrypt* ----------------------------------------------------------------
 
+#include <random>
 
-#include "../include/wdm.hpp"
-#include <iostream>
-#include <print>
+#include <Windows.h>
 
-#include <cstdlib>
+#include "nt_stubs_internal.hpp"
+
+static std::random_device sRandomDevice;
 
 static NTSTATUS NTAPI impl_BCryptGenRandom(PVOID alg, UCHAR *buf, ULONG len, ULONG flags)
 {
@@ -20,7 +21,7 @@ static NTSTATUS NTAPI impl_BCryptGenRandom(PVOID alg, UCHAR *buf, ULONG len, ULO
 
     for (ULONG i = 0; i < len; ++i)
     {
-        buf[i] = static_cast<UCHAR>(std::rand() & 0xFF);
+        buf[i] = static_cast<UCHAR>(sRandomDevice() & 0xFF);
     }
 
     return STATUS_SUCCESS;

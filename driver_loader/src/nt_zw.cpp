@@ -1,31 +1,35 @@
 // ---- Zw* --------------------------------------------------------------------
 
-
 #include "../include/wdm.hpp"
 #include <iostream>
 #include <print>
 
 static NTSTATUS NTAPI impl_ZwClose(HANDLE /*handle*/)
 {
-    std::println(stderr, "[nt_stubs] call {}", __func__);
+    NT_STUB_REPORT();
     std::flush(std::cerr);
     return STATUS_SUCCESS;
 }
 
 static NTSTATUS NTAPI impl_ZwOpenKey(HANDLE *key, ULONG /*access*/, PVOID /*attrs*/)
 {
-    std::println(stderr, "[nt_stubs] call {}", __func__);
+    NT_STUB_REPORT();
     std::flush(std::cerr);
     if (key)
         *key = nullptr;
     return STATUS_OBJECT_NAME_NOT_FOUND;
 }
 
-static NTSTATUS NTAPI impl_ZwCreateKey(HANDLE *key, ULONG /*access*/, PVOID /*attrs*/,
-                                       ULONG /*titleIdx*/, PVOID /*cls*/, ULONG /*options*/,
-                                       ULONG *disposition)
+static NTSTATUS NTAPI impl_ZwCreateKey(
+    HANDLE *key,
+    ULONG /*access*/,
+    PVOID /*attrs*/,
+    ULONG /*titleIdx*/,
+    PVOID /*cls*/,
+    ULONG /*options*/,
+    ULONG *disposition)
 {
-    std::println(stderr, "[nt_stubs] call {}", __func__);
+    NT_STUB_REPORT();
     std::flush(std::cerr);
     if (key)
         *key = nullptr;
@@ -34,55 +38,70 @@ static NTSTATUS NTAPI impl_ZwCreateKey(HANDLE *key, ULONG /*access*/, PVOID /*at
     return STATUS_SUCCESS;
 }
 
-static NTSTATUS NTAPI impl_ZwQueryValueKey(HANDLE /*key*/, PVOID /*name*/, ULONG /*keyClass*/,
-                                           PVOID /*info*/, ULONG /*infoLen*/, ULONG *resultLen)
+static NTSTATUS NTAPI impl_ZwQueryValueKey(
+    HANDLE /*key*/,
+    PVOID /*name*/,
+    ULONG /*keyClass*/,
+    PVOID /*info*/,
+    ULONG /*infoLen*/,
+    ULONG *resultLen)
 {
-    std::println(stderr, "[nt_stubs] call {}", __func__);
+    NT_STUB_REPORT();
     std::flush(std::cerr);
     if (resultLen)
         *resultLen = 0;
     return STATUS_OBJECT_NAME_NOT_FOUND;
 }
 
-static NTSTATUS NTAPI impl_ZwSetValueKey(HANDLE /*key*/, PVOID /*name*/, ULONG /*titleIdx*/,
-                                         ULONG /*type*/, PVOID /*data*/, ULONG /*len*/)
+static NTSTATUS NTAPI impl_ZwSetValueKey(
+    HANDLE /*key*/,
+    PVOID /*name*/,
+    ULONG /*titleIdx*/,
+    ULONG /*type*/,
+    PVOID /*data*/,
+    ULONG /*len*/)
 {
-    std::println(stderr, "[nt_stubs] call {}", __func__);
+    NT_STUB_REPORT();
     std::flush(std::cerr);
     return STATUS_SUCCESS;
 }
 
 static NTSTATUS NTAPI impl_ZwSetSecurityObject(HANDLE /*handle*/, ULONG /*secInfo*/, PVOID /*sd*/)
 {
-    std::println(stderr, "[nt_stubs] call {}", __func__);
+    NT_STUB_REPORT();
     std::flush(std::cerr);
     return STATUS_SUCCESS;
 }
 
-static NTSTATUS NTAPI impl_ZwQuerySystemInformation(ULONG /*infoClass*/, PVOID /*info*/,
-                                                    ULONG /*infoLen*/, ULONG *returnLen)
+static NTSTATUS NTAPI impl_ZwQuerySystemInformation(
+    ULONG /*infoClass*/, PVOID /*info*/, ULONG /*infoLen*/, ULONG *returnLen)
 {
-    std::println(stderr, "[nt_stubs] call {}", __func__);
+    NT_STUB_REPORT();
     std::flush(std::cerr);
     if (returnLen)
         *returnLen = 0;
     return STATUS_NOT_SUPPORTED;
 }
 
-static NTSTATUS NTAPI impl_ZwFlushInstructionCache(HANDLE /*process*/, PVOID /*baseAddr*/,
-                                                   SIZE_T /*len*/)
+static NTSTATUS NTAPI
+impl_ZwFlushInstructionCache(HANDLE /*process*/, PVOID /*baseAddr*/, SIZE_T /*len*/)
 {
-    std::println(stderr, "[nt_stubs] call {}", __func__);
+    NT_STUB_REPORT();
     std::flush(std::cerr);
     FlushInstructionCache(GetCurrentProcess(), nullptr, 0);
     return STATUS_SUCCESS;
 }
 
-static NTSTATUS NTAPI impl_ZwDuplicateObject(HANDLE /*srcProcess*/, HANDLE /*srcHandle*/,
-                                             HANDLE /*dstProcess*/, HANDLE *dstHandle,
-                                             ULONG /*access*/, ULONG /*attrs*/, ULONG /*opts*/)
+static NTSTATUS NTAPI impl_ZwDuplicateObject(
+    HANDLE /*srcProcess*/,
+    HANDLE /*srcHandle*/,
+    HANDLE /*dstProcess*/,
+    HANDLE *dstHandle,
+    ULONG /*access*/,
+    ULONG /*attrs*/,
+    ULONG /*opts*/)
 {
-    std::println(stderr, "[nt_stubs] call {}", __func__);
+    NT_STUB_REPORT();
     std::flush(std::cerr);
     if (dstHandle)
         *dstHandle = nullptr;
@@ -91,16 +110,20 @@ static NTSTATUS NTAPI impl_ZwDuplicateObject(HANDLE /*srcProcess*/, HANDLE /*src
 
 static NTSTATUS NTAPI impl_ZwTerminateProcess(HANDLE /*process*/, NTSTATUS /*exitStatus*/)
 {
-    std::println(stderr, "[nt_stubs] call {}", __func__);
+    NT_STUB_REPORT();
     std::flush(std::cerr);
     return STATUS_SUCCESS;
 }
 
-static NTSTATUS NTAPI impl_ZwAllocateVirtualMemory(HANDLE /*process*/, PVOID *baseAddr,
-                                                   ULONG_PTR /*zeroBits*/, SIZE_T *regionSize,
-                                                   ULONG allocType, ULONG protect)
+static NTSTATUS NTAPI impl_ZwAllocateVirtualMemory(
+    HANDLE /*process*/,
+    PVOID *baseAddr,
+    ULONG_PTR /*zeroBits*/,
+    SIZE_T *regionSize,
+    ULONG allocType,
+    ULONG protect)
 {
-    std::println(stderr, "[nt_stubs] call {}", __func__);
+    NT_STUB_REPORT();
     std::flush(std::cerr);
     if (!baseAddr || !regionSize || *regionSize == 0)
         return STATUS_INVALID_PARAMETER;
@@ -114,10 +137,10 @@ static NTSTATUS NTAPI impl_ZwAllocateVirtualMemory(HANDLE /*process*/, PVOID *ba
     return STATUS_SUCCESS;
 }
 
-static NTSTATUS NTAPI impl_ZwFreeVirtualMemory(HANDLE /*process*/, PVOID *baseAddr,
-                                               SIZE_T *regionSize, ULONG freeType)
+static NTSTATUS NTAPI
+impl_ZwFreeVirtualMemory(HANDLE /*process*/, PVOID *baseAddr, SIZE_T *regionSize, ULONG freeType)
 {
-    std::println(stderr, "[nt_stubs] call {}", __func__);
+    NT_STUB_REPORT();
     std::flush(std::cerr);
     if (!baseAddr || !*baseAddr)
         return STATUS_INVALID_PARAMETER;
@@ -127,13 +150,20 @@ static NTSTATUS NTAPI impl_ZwFreeVirtualMemory(HANDLE /*process*/, PVOID *baseAd
     return STATUS_SUCCESS;
 }
 
-static NTSTATUS NTAPI impl_ZwCreateFile(HANDLE *fileHandle, ULONG /*access*/, PVOID /*attrs*/,
-                                        PVOID /*ioStatus*/, PVOID /*allocSize*/,
-                                        ULONG /*fileAttrs*/, ULONG /*shareAccess*/,
-                                        ULONG /*createDisp*/, ULONG /*createOpts*/,
-                                        PVOID /*eaBuffer*/, ULONG /*eaLength*/)
+static NTSTATUS NTAPI impl_ZwCreateFile(
+    HANDLE *fileHandle,
+    ULONG /*access*/,
+    PVOID /*attrs*/,
+    PVOID /*ioStatus*/,
+    PVOID /*allocSize*/,
+    ULONG /*fileAttrs*/,
+    ULONG /*shareAccess*/,
+    ULONG /*createDisp*/,
+    ULONG /*createOpts*/,
+    PVOID /*eaBuffer*/,
+    ULONG /*eaLength*/)
 {
-    std::println(stderr, "[nt_stubs] call {}", __func__);
+    NT_STUB_REPORT();
     std::flush(std::cerr);
     if (fileHandle)
         *fileHandle = nullptr;

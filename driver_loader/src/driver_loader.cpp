@@ -2,9 +2,6 @@
 
 // <windows.h> must come first (it's already included transitively via
 // driver_loader.hpp → <windows.h>, but make the dependency explicit here).
-#include "../include/driver_loader.hpp"
-#include "nt_stubs_internal.hpp"
-
 #include <algorithm>
 #include <atomic>
 #include <cstdint>
@@ -12,16 +9,21 @@
 #include <cstring>
 #include <format>
 #include <fstream>
-#include <ios>
+#include <iomanip>
+#include <iostream>
 #include <iterator>
 #include <mutex>
 #include <optional>
 #include <print>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
 #include <utility>
 #include <vector>
+
+#include "driver_loader.hpp"
+#include "nt_stubs_internal.hpp"
 
 // Forward declarations from nt_stubs.cpp.
 void *NtStubsAllocate(const char *name) noexcept;
@@ -110,21 +112,29 @@ static void PrintDbghelpStackTrace(EXCEPTION_POINTERS *ep)
     return;
 #endif
 
-    DL_LOG_ERROR("stack trace:");
+    DL_LOG_ERROR("Stack trace:");
     for (int i = 0; i < 64; ++i)
     {
-        const BOOL ok = StackWalk64(machine, process, thread, &frame, &context, nullptr,
-                                    SymFunctionTableAccess64, SymGetModuleBase64, nullptr);
+        const BOOL ok = StackWalk64(
+            machine,
+            process,
+            thread,
+            &frame,
+            &context,
+            nullptr,
+            SymFunctionTableAccess64,
+            SymGetModuleBase64,
+            nullptr);
         if (!ok || frame.AddrPC.Offset == 0)
             break;
 
-        char symbol_buf[sizeof(SYMBOL_INFO) + MAX_SYM_NAME] = {};
-        auto *symbol = reinterpret_cast<SYMBOL_INFO *>(symbol_buf);
+        char symbolBuf[sizeof(SYMBOL_INFO) + MAX_SYM_NAME] = {};
+        auto *symbol = reinterpret_cast<SYMBOL_INFO *>(symbolBuf);
         symbol->SizeOfStruct = sizeof(SYMBOL_INFO);
         symbol->MaxNameLen = MAX_SYM_NAME;
 
         DWORD64 displacement = 0;
-        const bool have_symbol =
+        const bool haveSymbol =
             SymFromAddr(process, frame.AddrPC.Offset, &displacement, symbol) == TRUE;
 #ifndef NDEBUG
         const DWORD symbolLookupError = have_symbol ? 0 : GetLastError();
@@ -132,26 +142,34 @@ static void PrintDbghelpStackTrace(EXCEPTION_POINTERS *ep)
 
         IMAGEHLP_LINE64 line = {};
         line.SizeOfStruct = sizeof(line);
-        DWORD line_displacement = 0;
-        const bool have_line =
-            SymGetLineFromAddr64(process, frame.AddrPC.Offset, &line_displacement, &line) == TRUE;
+        DWORD lineDisplacement = 0;
+        const bool haveLine =
+            SymGetLineFromAddr64(process, frame.AddrPC.Offset, &lineDisplacement, &line) == TRUE;
 
-        if (have_symbol && have_line)
+        std::ostringstream lineStream;
+
+        if (haveSymbol && haveLine)
         {
-            std::println(stderr, "  #{:02} {:p} {}+0x{:X} ({}:{})", i,
-                         reinterpret_cast<void *>(frame.AddrPC.Offset), symbol->Name,
-                         static_cast<unsigned long long>(displacement), line.FileName,
-                         line.LineNumber);
+            lineStream << "  #"
+                       << std::setw(2) << std::setfill('0') << i << ' '
+                       << "0x" << reinterpret_cast<void *>(frame.AddrPC.Offset) << ' '
+                       << symbol->Name << "+0x"
+                       << static_cast<intptr_t>(displacement) << ' '
+                       << '(' << line.FileName << ':' << line.LineNumber << ')';
+            DL_LOG_ERROR("{}", lineStream.str().c_str());
         }
-        else if (have_symbol)
+        else if (haveSymbol)
         {
-            std::println(stderr, "  #{:02} {:p} {}+0x{:X}", i,
-                         reinterpret_cast<void *>(frame.AddrPC.Offset), symbol->Name,
-                         static_cast<unsigned long long>(displacement));
+            lineStream << "  #"
+                       << std::setw(2) << std::setfill('0') << i << ' '
+                       << "0x" << reinterpret_cast<void *>(frame.AddrPC.Offset) << ' '
+                       << symbol->Name << "+0x"
+                       << static_cast<intptr_t>(displacement);
+            DL_LOG_ERROR("{}", lineStream.str().c_str());
         }
         else
         {
-            std::println(stderr, "  #{:02} {:p}", i, reinterpret_cast<void *>(frame.AddrPC.Offset));
+            DL_LOG_ERROR("  #{:02} {:p}", i, reinterpret_cast<void *>(frame.AddrPC.Offset));
         }
 #ifndef NDEBUG
         if (!have_symbol && gActiveEntryLoader != nullptr &&
@@ -164,9 +182,10 @@ static void PrintDbghelpStackTrace(EXCEPTION_POINTERS *ep)
             const std::uintptr_t current_pc = static_cast<std::uintptr_t>(frame.AddrPC.Offset);
             if (image_size > 0 && current_pc >= image_start && current_pc < image_end)
             {
-                DL_LOG_ERROR("SymFromAddr(0x{:X}) lookup failed: GetLastError()={}",
-                             static_cast<unsigned long long>(current_pc),
-                             static_cast<unsigned long>(symbolLookupError));
+                DL_LOG_ERROR(
+                    "SymFromAddr(0x{:X}) lookup failed: GetLastError()={}",
+                    static_cast<unsigned long long>(current_pc),
+                    static_cast<unsigned long>(symbolLookupError));
             }
         }
 #endif
@@ -237,7 +256,7 @@ bool IEqual(std::string_view a, std::string_view b) noexcept
 }
 
 std::mutex s_dbghelpMutex;
-std::atomic<int> s_dbghelpRefcount{0};
+std::atomic<int> s_dbghelpRefcount{ 0 };
 bool s_dbghelpInitialized = false;
 
 struct DebugSymbolRange final
@@ -246,8 +265,8 @@ struct DebugSymbolRange final
     std::uintptr_t endExclusive = 0;
 };
 
-[[nodiscard]] bool TryResolveSymbolRange(DriverLoader *loader, const char *symbolName,
-                                         DebugSymbolRange &range) noexcept
+[[nodiscard]] bool TryResolveSymbolRange(
+    DriverLoader *loader, const char *symbolName, DebugSymbolRange &range) noexcept
 {
     range = {};
     if (!loader || !symbolName)
@@ -255,9 +274,8 @@ struct DebugSymbolRange final
     return loader->GetDebugSymbolRange(symbolName, range.start, range.endExclusive);
 }
 
-[[nodiscard]] bool TryRedirectPrivilegedInstruction(EXCEPTION_POINTERS *ep,
-                                                    const DebugSymbolRange &range,
-                                                    const void *targetFunction) noexcept
+[[nodiscard]] bool TryRedirectPrivilegedInstruction(
+    EXCEPTION_POINTERS *ep, const DebugSymbolRange &range, const void *targetFunction) noexcept
 {
     if (!ep || !ep->ExceptionRecord || !ep->ContextRecord || !targetFunction)
     {
@@ -298,7 +316,8 @@ LONG WINAPI EntryExceptionDiagnostics(EXCEPTION_POINTERS *ep)
         {
             DL_LOG_WARNING(
                 "redirected privileged instruction at {:p} to KeGetCurrentIrql stub {:p}",
-                ep->ExceptionRecord->ExceptionAddress, keGetCurrentIrqlStub);
+                ep->ExceptionRecord->ExceptionAddress,
+                keGetCurrentIrqlStub);
             return EXCEPTION_CONTINUE_EXECUTION;
         }
     }
@@ -317,11 +336,13 @@ LONG WINAPI EntryExceptionDiagnostics(EXCEPTION_POINTERS *ep)
         access_type = er->ExceptionInformation[0];
         access_addr = er->ExceptionInformation[1];
     }
-    DL_LOG_ERROR("SEH: code=0x{:08X} addr={:p} flags=0x{:08X} access_type={} access_addr={:p}",
-                 static_cast<unsigned long>(er->ExceptionCode), er->ExceptionAddress,
-                 static_cast<unsigned long>(er->ExceptionFlags),
-                 static_cast<unsigned long long>(access_type),
-                 reinterpret_cast<void *>(access_addr));
+    DL_LOG_ERROR(
+        "SEH: code=0x{:08X} addr={:p} flags=0x{:08X} access_type={} access_addr={:p}",
+        static_cast<unsigned long>(er->ExceptionCode),
+        er->ExceptionAddress,
+        static_cast<unsigned long>(er->ExceptionFlags),
+        static_cast<unsigned long long>(access_type),
+        reinterpret_cast<void *>(access_addr));
     return EXCEPTION_CONTINUE_SEARCH;
 }
 
@@ -331,8 +352,8 @@ struct NextSymbolSearch
     DWORD64 next;
 };
 
-static BOOL CALLBACK FindNextSymbolCb(PSYMBOL_INFO symbol_info, ULONG /*symbol_size*/,
-                                         PVOID user_context)
+static BOOL CALLBACK
+FindNextSymbolCb(PSYMBOL_INFO symbol_info, ULONG /*symbol_size*/, PVOID user_context)
 {
     if (!symbol_info || !user_context)
         return FALSE;
@@ -348,8 +369,8 @@ static BOOL CALLBACK FindNextSymbolCb(PSYMBOL_INFO symbol_info, ULONG /*symbol_s
 constexpr ULONG kWdfDriverTag =
     (static_cast<ULONG>('W') << 16) | (static_cast<ULONG>('D') << 8) | static_cast<ULONG>('F');
 
-void CopyDriverNameToWdfGlobals(const std::wstring &source,
-                                CHAR (&dest)[WDF_DRIVER_GLOBALS_NAME_LEN])
+void CopyDriverNameToWdfGlobals(
+    const std::wstring &source, CHAR (&dest)[WDF_DRIVER_GLOBALS_NAME_LEN])
 {
     std::memset(dest, 0, sizeof(dest));
     if (source.empty())
@@ -357,9 +378,15 @@ void CopyDriverNameToWdfGlobals(const std::wstring &source,
         return;
     }
 
-    const int written =
-        WideCharToMultiByte(CP_UTF8, 0, source.c_str(), -1, dest,
-                            static_cast<int>(WDF_DRIVER_GLOBALS_NAME_LEN), nullptr, nullptr);
+    const int written = WideCharToMultiByte(
+        CP_UTF8,
+        0,
+        source.c_str(),
+        -1,
+        dest,
+        static_cast<int>(WDF_DRIVER_GLOBALS_NAME_LEN),
+        nullptr,
+        nullptr);
     if (written > 0)
     {
         return;
@@ -446,8 +473,8 @@ void DriverLoader::Load()
         throw std::runtime_error("Cannot open driver file: " + m_path);
 
     // Read into a char buffer; reinterpret as bytes where needed.
-    std::vector<char> file_chars((std::istreambuf_iterator<char>(ifs)),
-                                 std::istreambuf_iterator<char>());
+    std::vector<char> file_chars(
+        (std::istreambuf_iterator<char>(ifs)), std::istreambuf_iterator<char>());
     if (file_chars.empty())
         throw std::runtime_error("Driver file is empty: " + m_path);
 
@@ -471,7 +498,7 @@ void DriverLoader::Load()
     if (nth->Signature != IMAGE_NT_SIGNATURE) // 'PE\0\0'
         throw std::runtime_error("Not a valid PE file (bad NT signature)");
 
-        // Architecture check: the loaded driver must match the host process.
+    // Architecture check: the loaded driver must match the host process.
 #if defined(_M_AMD64) || defined(__x86_64__)
     constexpr WORD expected_machine = IMAGE_FILE_MACHINE_AMD64;
 #elif defined(_M_IX86) || defined(__i386__)
@@ -523,11 +550,10 @@ void DriverLoader::Load()
 void DriverLoader::InitializeSecurityCookie()
 {
     const auto *dos = static_cast<const IMAGE_DOS_HEADER *>(m_base);
-    const auto *nth = reinterpret_cast<const IMAGE_NT_HEADERS *>(static_cast<const char *>(m_base) +
-                                                                 dos->e_lfanew);
+    const auto *nth = reinterpret_cast<const IMAGE_NT_HEADERS *>(
+        static_cast<const char *>(m_base) + dos->e_lfanew);
 
-    const IMAGE_DATA_DIRECTORY *loadcfg_dir =
-        GetDataDir(m_base, IMAGE_DIRECTORY_ENTRY_LOAD_CONFIG);
+    const IMAGE_DATA_DIRECTORY *loadcfg_dir = GetDataDir(m_base, IMAGE_DIRECTORY_ENTRY_LOAD_CONFIG);
     if (!loadcfg_dir || loadcfg_dir->Size == 0)
     {
         return;
@@ -578,8 +604,11 @@ void DriverLoader::InitializeSecurityCookie()
     constexpr std::uintptr_t kFallbackCookieXorMask = 0xA55A4711U;
 #endif
     std::uint64_t seed = 0;
-    if (BCryptGenRandom(nullptr, reinterpret_cast<PUCHAR>(&seed), static_cast<ULONG>(sizeof(seed)),
-                        BCRYPT_USE_SYSTEM_PREFERRED_RNG) != STATUS_SUCCESS)
+    if (BCryptGenRandom(
+            nullptr,
+            reinterpret_cast<PUCHAR>(&seed),
+            static_cast<ULONG>(sizeof(seed)),
+            BCRYPT_USE_SYSTEM_PREFERRED_RNG) != STATUS_SUCCESS)
     {
         seed = 0;
     }
@@ -669,8 +698,10 @@ void DriverLoader::LoadPdb(const std::string &pdbPath)
         {
             const DWORD attribute_error = GetLastError();
             throw std::runtime_error(
-                std::format("PDB path is invalid or inaccessible: {} (GetLastError={})", pdbPath,
-                            static_cast<unsigned long>(attribute_error)));
+                std::format(
+                    "PDB path is invalid or inaccessible: {} (GetLastError={})",
+                    pdbPath,
+                    static_cast<unsigned long>(attribute_error)));
         }
         if ((attributes & FILE_ATTRIBUTE_DIRECTORY) != 0)
         {
@@ -706,9 +737,15 @@ void DriverLoader::LoadPdb(const std::string &pdbPath)
         m_dbghelpModuleBase = 0;
     }
 
-    DWORD64 mod_base =
-        SymLoadModuleEx(proc, nullptr, m_path.c_str(), nullptr, reinterpret_cast<DWORD64>(m_base),
-                        static_cast<DWORD>(m_imageSize), nullptr, 0);
+    DWORD64 mod_base = SymLoadModuleEx(
+        proc,
+        nullptr,
+        pdbPath.c_str(),
+        nullptr,
+        reinterpret_cast<DWORD64>(m_base),
+        static_cast<DWORD>(m_imageSize),
+        nullptr,
+        0);
     if (mod_base == 0)
     {
         throw std::runtime_error("SymLoadModuleEx failed for image: " + m_path);
@@ -768,8 +805,8 @@ void DriverLoader::MapSections(const std::byte *file_data, std::size_t /*file_si
 void DriverLoader::ApplyRelocations()
 {
     const auto *dos = static_cast<const IMAGE_DOS_HEADER *>(m_base);
-    const auto *nth = reinterpret_cast<const IMAGE_NT_HEADERS *>(static_cast<const char *>(m_base) +
-                                                                 dos->e_lfanew);
+    const auto *nth = reinterpret_cast<const IMAGE_NT_HEADERS *>(
+        static_cast<const char *>(m_base) + dos->e_lfanew);
 
     const std::uintptr_t image_base_preferred =
         static_cast<std::uintptr_t>(nth->OptionalHeader.ImageBase);
@@ -976,8 +1013,8 @@ void *DriverLoader::ResolveImport(std::string_view dll_name, std::string_view fu
         void *stub = NtStubsAllocate(name_str.c_str());
         if (!is_ntoskrnl_dll)
         {
-            DL_LOG_WARNING("no symbol provided for {}!{}; using stub @ {:p}.", dll_name, name_str,
-                           stub);
+            DL_LOG_WARNING(
+                "no symbol provided for {}!{}; using stub @ {:p}.", dll_name, name_str, stub);
         }
         else
         {
@@ -997,8 +1034,8 @@ NTSTATUS DriverLoader::CallDriverEntry(const std::optional<std::wstring> &regist
         throw std::runtime_error("DriverLoader::CallDriverEntry() called before Load()");
 
     const auto *dos = static_cast<const IMAGE_DOS_HEADER *>(m_base);
-    const auto *nth = reinterpret_cast<const IMAGE_NT_HEADERS *>(static_cast<const char *>(m_base) +
-                                                                 dos->e_lfanew);
+    const auto *nth = reinterpret_cast<const IMAGE_NT_HEADERS *>(
+        static_cast<const char *>(m_base) + dos->e_lfanew);
 
     if (nth->OptionalHeader.AddressOfEntryPoint == 0)
         throw std::runtime_error("Driver PE has no entry point");
@@ -1054,8 +1091,8 @@ NTSTATUS DriverLoader::CallDriverEntry(const std::optional<std::wstring> &regist
     // interworking bit (bit 0).  We must set it so that an indirect branch
     // (BLX Rx) will switch the CPU to Thumb mode before executing the code.
     using DriverEntryFn = NTSTATUS(NTAPI *)(PDRIVER_OBJECT, PUNICODE_STRING);
-    auto entry_addr = reinterpret_cast<ULONG_PTR>(static_cast<char *>(m_base) +
-                                                  nth->OptionalHeader.AddressOfEntryPoint);
+    auto entry_addr = reinterpret_cast<ULONG_PTR>(
+        static_cast<char *>(m_base) + nth->OptionalHeader.AddressOfEntryPoint);
 #if defined(_M_ARM) || defined(__arm__)
     entry_addr |= 1U; // set Thumb interworking bit
 #endif
@@ -1088,8 +1125,7 @@ void *DriverLoader::GetExport(const std::string &name) const
         static_cast<const IMAGE_EXPORT_DIRECTORY *>(RvaToPtr(m_base, export_dir->VirtualAddress));
 
     const DWORD *name_ptrs = static_cast<const DWORD *>(RvaToPtr(m_base, ied->AddressOfNames));
-    const WORD *ordinals =
-        static_cast<const WORD *>(RvaToPtr(m_base, ied->AddressOfNameOrdinals));
+    const WORD *ordinals = static_cast<const WORD *>(RvaToPtr(m_base, ied->AddressOfNameOrdinals));
     const DWORD *funcs = static_cast<const DWORD *>(RvaToPtr(m_base, ied->AddressOfFunctions));
 
     for (DWORD i = 0; i < ied->NumberOfNames; ++i)
@@ -1155,8 +1191,8 @@ void *DriverLoader::GetDebugSymbol(const std::string &name) const
     return reinterpret_cast<void *>(sip.si.Address);
 }
 
-bool DriverLoader::GetDebugSymbolRange(const std::string &name, std::uintptr_t &start,
-                                       std::uintptr_t &endExclusive) const
+bool DriverLoader::GetDebugSymbolRange(
+    const std::string &name, std::uintptr_t &start, std::uintptr_t &endExclusive) const
 {
     start = 0;
     endExclusive = 0;
@@ -1234,8 +1270,8 @@ std::wstring DriverLoader::DeriveDriverNameFromPath(std::string_view path)
         return {};
     }
 
-    int required = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, stem.data(),
-                                       static_cast<int>(stem.size()), nullptr, 0);
+    int required = MultiByteToWideChar(
+        CP_UTF8, MB_ERR_INVALID_CHARS, stem.data(), static_cast<int>(stem.size()), nullptr, 0);
     if (required <= 0)
     {
         required =
@@ -1245,14 +1281,19 @@ std::wstring DriverLoader::DeriveDriverNameFromPath(std::string_view path)
             return {};
         }
         std::wstring out(static_cast<std::size_t>(required), L'\0');
-        (void)MultiByteToWideChar(CP_ACP, 0, stem.data(), static_cast<int>(stem.size()), out.data(),
-                                  required);
+        (void)MultiByteToWideChar(
+            CP_ACP, 0, stem.data(), static_cast<int>(stem.size()), out.data(), required);
         return out;
     }
 
     std::wstring out(static_cast<std::size_t>(required), L'\0');
-    (void)MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, stem.data(),
-                              static_cast<int>(stem.size()), out.data(), required);
+    (void)MultiByteToWideChar(
+        CP_UTF8,
+        MB_ERR_INVALID_CHARS,
+        stem.data(),
+        static_cast<int>(stem.size()),
+        out.data(),
+        required);
     return out;
 }
 

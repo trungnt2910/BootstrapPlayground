@@ -1,27 +1,31 @@
 // ---- Ps* --------------------------------------------------------------------
 
+#include <Windows.h>
 
-#include "../include/wdm.hpp"
-#include <iostream>
-#include <print>
+#include "nt_stubs_internal.hpp"
+
+struct _PS_FAKE_PROCESS_TYPE {} PsFakeProcessType;
+struct _PS_FAKE_THREAD_TYPE {} PsFakeThreadType;
+struct EPROCESS PsFakeSystemProcess;
+
+PVOID impl_PsProcessType = &PsFakeProcessType;
+PVOID impl_PsThreadType = &PsFakeThreadType;
+PEPROCESS impl_PsInitialSystemProcess = &PsFakeSystemProcess;
 
 static NTSTATUS NTAPI impl_PsRegisterPicoProvider(PVOID /*provider*/, PVOID /*routines*/)
 {
-    std::println(stderr, "[nt_stubs] call {}", __func__);
-    std::flush(std::cerr);
+    NT_STUB_REPORT();
     return STATUS_TOO_LATE;
 }
 
 static PVOID NTAPI impl_PsGetCurrentProcessId(VOID)
 {
-    std::println(stderr, "[nt_stubs] call {}", __func__);
-    std::flush(std::cerr);
+    NT_STUB_REPORT();
     return reinterpret_cast<PVOID>(static_cast<ULONG_PTR>(GetCurrentProcessId()));
 }
 
 static PVOID NTAPI impl_PsGetProcessId(PEPROCESS /*process*/)
 {
-    std::println(stderr, "[nt_stubs] call {}", __func__);
-    std::flush(std::cerr);
+    NT_STUB_REPORT();
     return nullptr;
 }
