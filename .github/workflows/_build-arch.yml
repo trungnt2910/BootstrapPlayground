@@ -176,7 +176,7 @@ jobs:
             env HOME=/tmp WINEDEBUG=-all \
                 WINEDLLPATH=/usr/lib/${{ steps.vars.outputs.debian_multiarch }}/wine \
                 WINEARCH=${{ steps.vars.outputs.wine_arch }} \
-            wine /mnt/work/build/test_host/test_host.exe \
+            wine /mnt/work/build/test_host/test_host.exe --log-level=trace \
             'Z:\mnt\work\build\${{ steps.vars.outputs.lxmonika_sys }}'
 
       # ── Artifact upload ─────────────────────────────────────────────────────

@@ -23,6 +23,7 @@
 #include <vector>
 
 #include "driver_loader.hpp"
+#include "logger.hpp"
 #include "nt_stubs_internal.hpp"
 
 // Forward declarations from nt_stubs.cpp.
@@ -659,6 +660,8 @@ void DriverLoader::InitializeSecurityCookie()
 
 void DriverLoader::LoadPdb(const std::string &pdbPath)
 {
+    DL_LOG_TRACE("Loading PDB at: {}", pdbPath);
+
     if (!m_base)
     {
         throw std::runtime_error("DriverLoader::LoadPdb() called before Load()");
