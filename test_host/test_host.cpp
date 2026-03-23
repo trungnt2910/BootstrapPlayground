@@ -50,16 +50,12 @@ static LONG WINAPI top_level_exception_filter(EXCEPTION_POINTERS* ep) {
 // Select the architecture-appropriate lxmonika driver filename.
 #if defined(__x86_64__) || defined(_M_AMD64)
 #  define LXMONIKA_SYS "lxmonika_x64.sys"
-#  define LXMONIKA_PDB "lxmonika_x64.pdb"
 #elif defined(__i386__) || defined(_M_IX86)
 #  define LXMONIKA_SYS "lxmonika_x86.sys"
-#  define LXMONIKA_PDB "lxmonika_x86.pdb"
 #elif defined(__aarch64__) || defined(_M_ARM64)
 #  define LXMONIKA_SYS "lxmonika_arm64.sys"
-#  define LXMONIKA_PDB "lxmonika_arm64.pdb"
 #elif defined(__arm__) || defined(_M_ARM)
 #  define LXMONIKA_SYS "lxmonika_arm.sys"
-#  define LXMONIKA_PDB "lxmonika_arm.pdb"
 #else
 #  error "Unknown target architecture – cannot select lxmonika driver"
 #endif
@@ -112,6 +108,14 @@ int main(int argc, char* argv[]) {
 
     std::println(stderr, "[test_host] Loading driver: {}", path_cstr);
 
+    static char pdb_path[MAX_PATH + 32];
+    std::strncpy(pdb_path, path_cstr, sizeof(pdb_path) - 1);
+    pdb_path[sizeof(pdb_path) - 1] = '\0';
+    char* pdb_ext = std::strrchr(pdb_path, '.');
+    if (pdb_ext != nullptr) {
+        std::strcpy(pdb_ext, ".pdb");
+    }
+
     try {
         // DriverLoader constructor accepts std::string; construct it here
         // inside the try block so any allocation failure is caught.
@@ -125,11 +129,11 @@ int main(int argc, char* argv[]) {
 
         loader.Load();
         std::println(stderr, "[test_host] Driver loaded at {}.", loader.GetBase());
-        if (GetFileAttributesA(LXMONIKA_PDB) != INVALID_FILE_ATTRIBUTES) {
-            loader.LoadPdb(LXMONIKA_PDB);
-            std::println(stderr, "[test_host] Loaded PDB: {}", LXMONIKA_PDB);
+        if (GetFileAttributesA(pdb_path) != INVALID_FILE_ATTRIBUTES) {
+            loader.LoadPdb(pdb_path);
+            std::println(stderr, "[test_host] Loaded PDB: {}", pdb_path);
         } else {
-            std::println(stderr, "[test_host] PDB not found, skipping symbol load: {}", LXMONIKA_PDB);
+            std::println(stderr, "[test_host] PDB not found, skipping symbol load: {}", pdb_path);
         }
 
         const NTSTATUS status = loader.CallDriverEntry(std::nullopt);
