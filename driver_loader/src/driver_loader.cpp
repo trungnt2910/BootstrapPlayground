@@ -607,7 +607,6 @@ void DriverLoader::LoadPdb(const std::string& pdbPath) {
         return iequal(ext, ".pdb");
     };
 
-    std::string image_for_symbols = m_path;
     if (!pdbPath.empty()) {
         const DWORD attributes = GetFileAttributesA(pdbPath.c_str());
         if (attributes == INVALID_FILE_ATTRIBUTES) {
@@ -623,7 +622,6 @@ void DriverLoader::LoadPdb(const std::string& pdbPath) {
 
         std::string search_path = pdbPath;
         if (has_pdb_extension(pdbPath)) {
-            image_for_symbols = pdbPath;
             const std::size_t sep = pdbPath.find_last_of("/\\");
             if (sep == std::string::npos) {
                 search_path = ".";
@@ -646,7 +644,7 @@ void DriverLoader::LoadPdb(const std::string& pdbPath) {
     DWORD64 mod_base = SymLoadModuleEx(
         proc,
         nullptr,
-        image_for_symbols.c_str(),
+        m_path.c_str(),
         nullptr,
         reinterpret_cast<DWORD64>(m_base),
         static_cast<DWORD>(m_image_size),
