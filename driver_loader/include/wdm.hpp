@@ -132,6 +132,9 @@ typedef const UNICODE_STRING* PCUNICODE_STRING;
 #ifndef STATUS_ACCESS_DENIED
 #  define STATUS_ACCESS_DENIED     ((NTSTATUS)0xC0000022L)
 #endif
+#ifndef STATUS_TOO_LATE
+#  define STATUS_TOO_LATE          ((NTSTATUS)0xC00000D4L)
+#endif
 
 inline bool NT_SUCCESS(NTSTATUS st) noexcept { return st >= 0; }
 
