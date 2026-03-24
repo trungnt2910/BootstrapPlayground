@@ -261,7 +261,7 @@ jobs:
           sudo mount --bind /proc      $SYSROOT/proc
           sudo mount --bind /dev       $SYSROOT/dev
           sudo mount --bind "$WORKDIR" $SYSROOT/mnt/work
-          trap 'sudo umount $SYSROOT/mnt/work 2>/dev/null || true
+          trap 'sudo umount $SYSROOT/mnt/work   2>/dev/null || true
                 sudo umount $SYSROOT/dev        2>/dev/null || true
                 sudo umount $SYSROOT/proc       2>/dev/null || true' EXIT
 
