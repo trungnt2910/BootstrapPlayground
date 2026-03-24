@@ -154,14 +154,14 @@ jobs:
           FILE=$(curl -fsSL "${ALPINE_MIRROR}/releases/${ALPINE_ARCH}/latest-releases.yaml" \
             | awk '/flavor: alpine-minirootfs/{found=1} found && /file:/{print $2; found=0}' \
             | head -1)
-          sudo mkdir -p "$SYSROOT"
+          mkdir -p "$SYSROOT"
           curl -fL "${ALPINE_MIRROR}/releases/${ALPINE_ARCH}/${FILE}" | \
             tar -xzf - -C "$SYSROOT"
 
-          echo "nameserver 1.1.1.1" | sudo tee "$SYSROOT/etc/resolv.conf" > /dev/null
+          echo "nameserver 1.1.1.1" > "$SYSROOT/etc/resolv.conf"
           printf '%s/main\n%s/community\n' \
             "$ALPINE_MIRROR" "$ALPINE_MIRROR" \
-            | sudo tee "$SYSROOT/etc/apk/repositories" > /dev/null
+            | tee "$SYSROOT/etc/apk/repositories" > /dev/null
 
           # ── 2. Install sysroot libraries ───────────────────────────────────
           sudo chroot "$SYSROOT" apk update
