@@ -57,12 +57,12 @@ typedef unsigned char BYTE;
 #endif // _WINNT_
 
 // ---------------------------------------------------------------------------
-// UNICODE_STRING – must match Windows ABI exactly
+// Strings
 // ---------------------------------------------------------------------------
 
 #ifndef _UNICODE_STRING_DEFINED
 #define _UNICODE_STRING_DEFINED
-typedef struct UNICODE_STRING
+typedef struct _UNICODE_STRING
 {
     USHORT Length;
     USHORT MaximumLength;
@@ -72,6 +72,15 @@ typedef struct UNICODE_STRING
 
 typedef UNICODE_STRING *PUNICODE_STRING;
 typedef const UNICODE_STRING *PCUNICODE_STRING;
+
+typedef struct _STRING
+{
+    USHORT Length;
+    USHORT MaximumLength;
+    CHAR  *Buffer;
+} STRING, *PSTRING;
+
+typedef const STRING *PCSTRING;
 
 // ---------------------------------------------------------------------------
 // Calling convention
