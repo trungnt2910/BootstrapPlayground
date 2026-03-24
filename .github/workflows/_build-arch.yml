@@ -177,12 +177,8 @@ jobs:
             musl-dev \
             linux-headers \
             zlib-dev \
-            compiler-rt \
-            clang-rtlib \
             clang
 
-          # Determine clang resource directory and compiler-rt library path
-          # from the Alpine sysroot so that --rtlib=compiler-rt can find builtins.
           LLVM_VER=$(ls "$SYSROOT/usr/lib/clang/" | sort -V | tail -1)
           CLANG_RES="$SYSROOT/usr/lib/clang/$LLVM_VER"
           RT_LIB_PATH="$SYSROOT/usr/lib/clang/$LLVM_VER/lib/linux"
@@ -222,7 +218,6 @@ jobs:
           cd ..
 
           # ── 6. Cross-compile Wine ──────────────────────────────────────────
-          set +e
           mkdir -p wine-cross-build && cd wine-cross-build
           "$WINE_SRC/configure" \
             --host="${ALPINE_HOST}" \
@@ -247,18 +242,17 @@ jobs:
             CFLAGS="-I${SYSROOT}/usr/include ${SUPPRESS_FLAGS}" \
             CXXFLAGS="-I${SYSROOT}/usr/include ${SUPPRESS_FLAGS}" \
             EXTRACFLAGS="${SUPPRESS_FLAGS}" \
-            CROSSCC="$WORKDIR/llvm-mingw/bin/$MINGW_ARCH-w64-mingw32-clang" \
-            LDFLAGS="-fuse-ld=${CUSTOM_LD} --rtlib=compiler-rt -L${SYSROOT}/usr/lib -L${SYSROOT}/lib -L${RT_LIB_PATH}" \
+            CROSSCC="$MINGW_ARCH-w64-mingw32-clang" \
+            LDFLAGS="-fuse-ld=${CUSTOM_LD} -L${SYSROOT}/usr/lib -L${SYSROOT}/lib -L${RT_LIB_PATH}" \
             CPPFLAGS="-I${SYSROOT}/usr/include"
-          set -e
           make -j"$(nproc)"
-          sudo make DESTDIR="${SYSROOT}" install
+          sudo PATH=$PATH make DESTDIR="${SYSROOT}" install
           cd ..
 
           # ── 7. Pack the chroot ─────────────────────────────────────────────
           sudo tar --zstd -cf chroot.tar.zst \
             --exclude='./proc/*' --exclude='./dev/*' \
-            -C rootfs .
+            -C $SYSROOT .
 
       - name: Restore Alpine chroot from cache
         if: steps.cache_chroot.outputs.cache-hit == 'true'
