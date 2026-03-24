@@ -266,7 +266,7 @@ jobs:
           # To prevent WINE from whining.
           sudo chroot rootfs /bin/sh -c 'chown $USER:$USER $HOME'
 
-          sudo chroot rootfs \
+          sudo chroot rootfs env \
             LD_LIBRARY_PATH=/usr/local/lib/wine/$WINE_ARCH-unix \
             WINEDLLPATH=/usr/local/lib/wine/$WINE_ARCH-windows \
             "$WINE_BIN" /mnt/work/hello.exe
