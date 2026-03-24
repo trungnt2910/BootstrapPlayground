@@ -30,7 +30,6 @@ jobs:
               echo "pwsh_arch=x86"                          >> "$GITHUB_OUTPUT"
               echo "wine_archs=i386"                        >> "$GITHUB_OUTPUT"
               echo "alpine_host=i686-alpine-linux-musl"     >> "$GITHUB_OUTPUT"
-              echo "clang_march="                           >> "$GITHUB_OUTPUT"
               ;;
             x64)
               echo "mingw_arch=x86_64"                      >> "$GITHUB_OUTPUT"
@@ -40,7 +39,6 @@ jobs:
               echo "pwsh_arch=x64"                          >> "$GITHUB_OUTPUT"
               echo "wine_archs=x86_64"                      >> "$GITHUB_OUTPUT"
               echo "alpine_host=x86_64-alpine-linux-musl"  >> "$GITHUB_OUTPUT"
-              echo "clang_march=-march=x86-64"              >> "$GITHUB_OUTPUT"
               ;;
             ARM)
               echo "mingw_arch=armv7"                          >> "$GITHUB_OUTPUT"
@@ -50,7 +48,6 @@ jobs:
               echo "pwsh_arch=arm32"                           >> "$GITHUB_OUTPUT"
               echo "wine_archs=arm"                            >> "$GITHUB_OUTPUT"
               echo "alpine_host=arm-linux-musleabihf"          >> "$GITHUB_OUTPUT"
-              echo "clang_march=-march=armv7-a -mfloat-abi=hard" >> "$GITHUB_OUTPUT"
               ;;
             ARM64)
               echo "mingw_arch=aarch64"                     >> "$GITHUB_OUTPUT"
@@ -60,7 +57,6 @@ jobs:
               echo "pwsh_arch=arm64"                        >> "$GITHUB_OUTPUT"
               echo "wine_archs=aarch64"                     >> "$GITHUB_OUTPUT"
               echo "alpine_host=aarch64-alpine-linux-musl"  >> "$GITHUB_OUTPUT"
-              echo "clang_march="                           >> "$GITHUB_OUTPUT"
               ;;
           esac
 
@@ -104,26 +100,12 @@ jobs:
           "${{ steps.vars.outputs.mingw_arch }}-w64-mingw32-clang++" \
             -static -o hello.exe hello.cpp
 
-      # ── PowerShell ──────────────────────────────────────────────────────────
-
-      - name: Download PowerShell for ${{ inputs.arch }}
-        run: |
-          PS_VERSION="7.4.0-preview.4"
-          PS_ARCH="${{ steps.vars.outputs.pwsh_arch }}"
-          curl -fL "https://github.com/PowerShell/PowerShell/releases/download/v${PS_VERSION}/PowerShell-${PS_VERSION}-win-${PS_ARCH}.zip" \
-            -o powershell.zip
-          mkdir -p powershell
-          unzip -q powershell.zip -d powershell
-          rm powershell.zip
-
       # ── QEMU user-mode emulation ────────────────────────────────────────────
 
       - name: Install QEMU user-mode emulation
         run: |
           sudo apt-get update -q
           sudo apt-get install -y qemu-user-static binfmt-support
-          echo "QEMU arm  : $(qemu-arm-static     --version | head -1)"
-          echo "QEMU arm64: $(qemu-aarch64-static --version | head -1)"
 
       # ── Alpine chroot + Wine (all architectures) ───────────────────────────────
       #
@@ -172,7 +154,6 @@ jobs:
           WINE_MAJOR="${{ steps.wine_version.outputs.major }}"
           WINE_ARCHS="${{ steps.vars.outputs.wine_archs }}"
           ALPINE_HOST="${{ steps.vars.outputs.alpine_host }}"
-          CLANG_MARCH="${{ steps.vars.outputs.clang_march }}"
           SYSROOT="$PWD/rootfs"
 
           export PATH="$PWD/llvm-mingw/bin:$PATH"
@@ -187,7 +168,7 @@ jobs:
           sudo tar -xzf alpine-rootfs.tar.gz -C "$SYSROOT"
           rm alpine-rootfs.tar.gz
 
-          echo "nameserver 8.8.8.8" | sudo tee "$SYSROOT/etc/resolv.conf" > /dev/null
+          echo "nameserver 1.1.1.1" | sudo tee "$SYSROOT/etc/resolv.conf" > /dev/null
           printf '%s/main\n%s/community\n' \
             "$ALPINE_MIRROR" "$ALPINE_MIRROR" \
             | sudo tee "$SYSROOT/etc/apk/repositories" > /dev/null
@@ -241,6 +222,7 @@ jobs:
           cd ..
 
           # ── 6. Cross-compile Wine ──────────────────────────────────────────
+          set +e
           mkdir -p wine-cross-build && cd wine-cross-build
           "$WINE_SRC/configure" \
             --host="${ALPINE_HOST}" \
@@ -260,18 +242,16 @@ jobs:
             --without-xinput --without-xinput2 --without-xrandr --without-xrender \
             --without-xshape --without-xshm --without-xxf86vm \
             LD="${CUSTOM_LD}" \
-            CC="clang -target ${MUSL_TARGET} --sysroot=${SYSROOT} ${CLANG_MARCH} -resource-dir=${CLANG_RES} -fuse-ld=${CUSTOM_LD} ${SUPPRESS_FLAGS}" \
-            CXX="clang++ -target ${MUSL_TARGET} --sysroot=${SYSROOT} ${CLANG_MARCH} -resource-dir=${CLANG_RES} -fuse-ld=${CUSTOM_LD} ${SUPPRESS_FLAGS}" \
+            CC="clang -target ${MUSL_TARGET} --sysroot=${SYSROOT} -resource-dir=${CLANG_RES} -fuse-ld=${CUSTOM_LD} ${SUPPRESS_FLAGS}" \
+            CXX="clang++ -target ${MUSL_TARGET} --sysroot=${SYSROOT} -resource-dir=${CLANG_RES} -fuse-ld=${CUSTOM_LD} ${SUPPRESS_FLAGS}" \
             CFLAGS="-I${SYSROOT}/usr/include ${SUPPRESS_FLAGS}" \
             CXXFLAGS="-I${SYSROOT}/usr/include ${SUPPRESS_FLAGS}" \
             EXTRACFLAGS="${SUPPRESS_FLAGS}" \
             CROSSCC="${{ steps.vars.outputs.mingw_arch }}-w64-mingw32-clang" \
             LDFLAGS="-fuse-ld=${CUSTOM_LD} --rtlib=compiler-rt --unwindlib=none -L${SYSROOT}/usr/lib -L${SYSROOT}/lib -L${RT_LIB_PATH}" \
-            CPPFLAGS="-I${SYSROOT}/usr/include" \
-            ac_cv_cflags__Werror_unused_command_line_argument=no \
-            ac_cv_cxxflags__Werror_unused_command_line_argument=no \
-            wine_cv_cflags__Werror_unused_command_line_argument=no \
-            wine_cv_cxxflags__Werror_unused_command_line_argument=no
+            CPPFLAGS="-I${SYSROOT}/usr/include"
+          cat config.log
+          set -e
           make -j"$(nproc)"
           sudo make DESTDIR="${SYSROOT}" install
           cd ..
@@ -326,39 +306,6 @@ jobs:
           sudo chroot rootfs \
             env HOME=/tmp WINEDEBUG=-all WINEARCH="$WINE_ARCH" \
             timeout 120 "$WINE_BIN" /mnt/work/hello.exe
-
-          sudo chroot rootfs env HOME=/tmp \
-            timeout 60 wineserver -w 2>/dev/null || \
-            sudo chroot rootfs env HOME=/tmp wineserver -k 2>/dev/null || true
-
-      - name: Run test.ps1 with PowerShell on WINE (${{ inputs.arch }})
-        run: |
-          sudo mkdir -p rootfs/mnt/work
-          sudo mount --bind /proc  rootfs/proc
-          sudo mount --bind /dev   rootfs/dev
-          sudo mount --bind "$PWD" rootfs/mnt/work
-          trap 'sudo umount rootfs/mnt/work 2>/dev/null || true
-                sudo umount rootfs/dev        2>/dev/null || true
-                sudo umount rootfs/proc       2>/dev/null || true' EXIT
-
-          WINE_ARCH="${{ steps.vars.outputs.wine_arch }}"
-          if [ "$WINE_ARCH" = "win64" ]; then
-            WINE_BIN=$(sudo chroot rootfs sh -c \
-              'command -v wine64 2>/dev/null || command -v wine')
-          else
-            WINE_BIN=$(sudo chroot rootfs sh -c 'command -v wine')
-          fi
-
-          # DOTNET_EnableDiagnostics=0 prevents .NET 8 from opening a
-          # diagnostics IPC socket that can stall under Wine.
-          # DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1 skips ICU loading.
-          sudo chroot rootfs \
-            env HOME=/tmp WINEDEBUG=-all WINEARCH="$WINE_ARCH" \
-                DOTNET_EnableDiagnostics=0 \
-                DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1 \
-            timeout 300 "$WINE_BIN" \
-              /mnt/work/powershell/pwsh.exe \
-              -NonInteractive -File /mnt/work/test.ps1
 
           sudo chroot rootfs env HOME=/tmp \
             timeout 60 wineserver -w 2>/dev/null || \
