@@ -26,32 +26,28 @@ jobs:
               echo "mingw_arch=i686"                        >> "$GITHUB_OUTPUT"
               echo "alpine_arch=x86"                        >> "$GITHUB_OUTPUT"
               echo "musl_target=i586-linux-musl"            >> "$GITHUB_OUTPUT"
-              echo "wine_arch=win32"                        >> "$GITHUB_OUTPUT"
-              echo "wine_archs=i386"                        >> "$GITHUB_OUTPUT"
+              echo "wine_arch=i386"                         >> "$GITHUB_OUTPUT"
               echo "alpine_host=i586-alpine-linux-musl"     >> "$GITHUB_OUTPUT"
               ;;
             x64)
               echo "mingw_arch=x86_64"                      >> "$GITHUB_OUTPUT"
               echo "alpine_arch=x86_64"                     >> "$GITHUB_OUTPUT"
               echo "musl_target=x86_64-linux-musl"          >> "$GITHUB_OUTPUT"
-              echo "wine_arch=win64"                        >> "$GITHUB_OUTPUT"
-              echo "wine_archs=x86_64"                      >> "$GITHUB_OUTPUT"
+              echo "wine_arch=x86_64"                       >> "$GITHUB_OUTPUT"
               echo "alpine_host=x86_64-alpine-linux-musl"   >> "$GITHUB_OUTPUT"
               ;;
             ARM)
               echo "mingw_arch=armv7"                          >> "$GITHUB_OUTPUT"
               echo "alpine_arch=armv7"                         >> "$GITHUB_OUTPUT"
               echo "musl_target=armv7-linux-musleabihf"        >> "$GITHUB_OUTPUT"
-              echo "wine_arch=win32"                           >> "$GITHUB_OUTPUT"
-              echo "wine_archs=arm"                            >> "$GITHUB_OUTPUT"
+              echo "wine_arch=arm"                             >> "$GITHUB_OUTPUT"
               echo "alpine_host=armv7-alpine-linux-musleabihf" >> "$GITHUB_OUTPUT"
               ;;
             ARM64)
               echo "mingw_arch=aarch64"                     >> "$GITHUB_OUTPUT"
               echo "alpine_arch=aarch64"                    >> "$GITHUB_OUTPUT"
               echo "musl_target=aarch64-linux-musl"         >> "$GITHUB_OUTPUT"
-              echo "wine_arch=win64"                        >> "$GITHUB_OUTPUT"
-              echo "wine_archs=aarch64"                     >> "$GITHUB_OUTPUT"
+              echo "wine_arch=aarch64"                      >> "$GITHUB_OUTPUT"
               echo "alpine_host=aarch64-alpine-linux-musl"  >> "$GITHUB_OUTPUT"
               ;;
           esac
@@ -83,10 +79,8 @@ jobs:
             --jq '[.assets[]
                    | select(.name | test("ucrt-ubuntu-.*-x86_64\\.tar\\.xz$"))]
                   | sort_by(.name) | .[0].browser_download_url')
-          curl -fL "$URL" -o llvm-mingw.tar.xz
           mkdir llvm-mingw
-          tar -xf llvm-mingw.tar.xz --strip-components=1 -C llvm-mingw
-          rm llvm-mingw.tar.xz
+          curl -fL "$URL" | tar -xJf - --strip-components=1 -C llvm-mingw
 
       # ── Cross-compile hello.exe ─────────────────────────────────────────────
 
@@ -137,7 +131,7 @@ jobs:
         uses: actions/cache@v5
         with:
           path: chroot.tar.zst
-          key: alpine-${{ steps.vars.outputs.alpine_arch }}-wine-${{ steps.wine_version.outputs.version }}-v11
+          key: alpine-${{ steps.vars.outputs.alpine_arch }}-wine-${{ steps.wine_version.outputs.version }}
 
       - name: Create Alpine chroot with cross-compiled Wine
         if: steps.cache_chroot.outputs.cache-hit != 'true'
@@ -148,7 +142,7 @@ jobs:
           MUSL_TARGET="${{ steps.vars.outputs.musl_target }}"
           WINE_VERSION="${{ steps.wine_version.outputs.version }}"
           WINE_MAJOR="${{ steps.wine_version.outputs.major }}"
-          WINE_ARCHS="${{ steps.vars.outputs.wine_archs }}"
+          WINE_ARCH="${{ steps.vars.outputs.wine_arch }}"
           ALPINE_HOST="${{ steps.vars.outputs.alpine_host }}"
           MINGW_ARCH="${{ steps.vars.outputs.mingw_arch }}"
           WORKDIR="${{ github.workspace }}"
@@ -160,11 +154,9 @@ jobs:
           FILE=$(curl -fsSL "${ALPINE_MIRROR}/releases/${ALPINE_ARCH}/latest-releases.yaml" \
             | awk '/flavor: alpine-minirootfs/{found=1} found && /file:/{print $2; found=0}' \
             | head -1)
-          curl -fL "${ALPINE_MIRROR}/releases/${ALPINE_ARCH}/${FILE}" \
-            -o alpine-rootfs.tar.gz
           sudo mkdir -p "$SYSROOT"
-          sudo tar -xzf alpine-rootfs.tar.gz -C "$SYSROOT"
-          rm alpine-rootfs.tar.gz
+          curl -fL "${ALPINE_MIRROR}/releases/${ALPINE_ARCH}/${FILE}" | \
+            tar -xzf - -C "$SYSROOT"
 
           echo "nameserver 1.1.1.1" | sudo tee "$SYSROOT/etc/resolv.conf" > /dev/null
           printf '%s/main\n%s/community\n' \
@@ -190,10 +182,8 @@ jobs:
 
           # ── 4. Wine source ─────────────────────────────────────────────────
           curl -fL \
-            "https://dl.winehq.org/wine/source/${WINE_MAJOR}/wine-${WINE_VERSION}.tar.xz" \
-            -o wine.tar.xz
-          tar -xf wine.tar.xz
-          rm wine.tar.xz
+            "https://dl.winehq.org/wine/source/${WINE_MAJOR}/wine-${WINE_VERSION}.tar.xz" | \
+            tar -xzf -
           WINE_SRC="$PWD/wine-${WINE_VERSION}"
 
           # ── 5. Build Wine host tools ───────────────────────────────────────
@@ -222,7 +212,7 @@ jobs:
           "$WINE_SRC/configure" \
             --host="${ALPINE_HOST}" \
             --with-wine-tools=../wine-tools-build \
-            --enable-archs="${WINE_ARCHS}" \
+            --enable-archs="${WINE_ARCH}" \
             --disable-tests --disable-win16 \
             --without-x \
             --without-alsa --without-capi --without-coreaudio --without-cups \
@@ -270,8 +260,8 @@ jobs:
                 sudo umount rootfs/dev        2>/dev/null || true
                 sudo umount rootfs/proc       2>/dev/null || true' EXIT
 
-          WINE_ARCH="${{ steps.vars.outputs.wine_archs }}"
-          WINE_BIN="/usr/local/lib/wine/${{ steps.vars.outputs.wine_archs }}-unix/wine"
+          WINE_ARCH="${{ steps.vars.outputs.wine_arch }}"
+          WINE_BIN="/usr/local/lib/wine/$WINE_ARCH-unix/wine"
 
           sudo chroot rootfs \
             env HOME=/tmp \
