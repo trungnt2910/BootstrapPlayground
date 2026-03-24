@@ -25,10 +25,10 @@ jobs:
             x86)
               echo "mingw_arch=i686"                        >> "$GITHUB_OUTPUT"
               echo "alpine_arch=x86"                        >> "$GITHUB_OUTPUT"
-              echo "musl_target=i686-linux-musl"            >> "$GITHUB_OUTPUT"
+              echo "musl_target=i586-linux-musl"            >> "$GITHUB_OUTPUT"
               echo "wine_arch=win32"                        >> "$GITHUB_OUTPUT"
               echo "wine_archs=i386"                        >> "$GITHUB_OUTPUT"
-              echo "alpine_host=i686-alpine-linux-musl"     >> "$GITHUB_OUTPUT"
+              echo "alpine_host=i586-alpine-linux-musl"     >> "$GITHUB_OUTPUT"
               ;;
             x64)
               echo "mingw_arch=x86_64"                      >> "$GITHUB_OUTPUT"
@@ -36,7 +36,7 @@ jobs:
               echo "musl_target=x86_64-linux-musl"          >> "$GITHUB_OUTPUT"
               echo "wine_arch=win64"                        >> "$GITHUB_OUTPUT"
               echo "wine_archs=x86_64"                      >> "$GITHUB_OUTPUT"
-              echo "alpine_host=x86_64-alpine-linux-musl"  >> "$GITHUB_OUTPUT"
+              echo "alpine_host=x86_64-alpine-linux-musl"   >> "$GITHUB_OUTPUT"
               ;;
             ARM)
               echo "mingw_arch=armv7"                          >> "$GITHUB_OUTPUT"
