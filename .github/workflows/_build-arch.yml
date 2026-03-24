@@ -151,9 +151,10 @@ jobs:
           WINE_ARCHS="${{ steps.vars.outputs.wine_archs }}"
           ALPINE_HOST="${{ steps.vars.outputs.alpine_host }}"
           MINGW_ARCH="${{ steps.vars.outputs.mingw_arch }}"
-          SYSROOT="$PWD/rootfs"
+          WORKDIR="${{ github.workspace }}"
+          SYSROOT="$WORKDIR/rootfs"
 
-          export PATH="$PWD/llvm-mingw/bin:$PATH"
+          export PATH="$WORKDIR/llvm-mingw/bin:$PATH"
 
           # ── 1. Alpine mini rootfs ──────────────────────────────────────────
           FILE=$(curl -fsSL "${ALPINE_MIRROR}/releases/${ALPINE_ARCH}/latest-releases.yaml" \
@@ -246,8 +247,8 @@ jobs:
             CFLAGS="-I${SYSROOT}/usr/include ${SUPPRESS_FLAGS}" \
             CXXFLAGS="-I${SYSROOT}/usr/include ${SUPPRESS_FLAGS}" \
             EXTRACFLAGS="${SUPPRESS_FLAGS}" \
-            CROSSCC="$MINGW_ARCH-w64-mingw32-clang" \
-            LDFLAGS="-fuse-ld=${CUSTOM_LD} --rtlib=compiler-rt --unwindlib=none -L${SYSROOT}/usr/lib -L${SYSROOT}/lib -L${RT_LIB_PATH}" \
+            CROSSCC="$WORKDIR/llvm-mingw/bin/$MINGW_ARCH-w64-mingw32-clang" \
+            LDFLAGS="-fuse-ld=${CUSTOM_LD} --rtlib=compiler-rt -L${SYSROOT}/usr/lib -L${SYSROOT}/lib -L${RT_LIB_PATH}" \
             CPPFLAGS="-I${SYSROOT}/usr/include"
           set -e
           make -j"$(nproc)"
