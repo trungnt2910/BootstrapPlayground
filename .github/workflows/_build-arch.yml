@@ -183,7 +183,7 @@ jobs:
           # ── 4. Wine source ─────────────────────────────────────────────────
           curl -fL \
             "https://dl.winehq.org/wine/source/${WINE_MAJOR}/wine-${WINE_VERSION}.tar.xz" | \
-            tar -xzf -
+            tar -xJf -
           WINE_SRC="$PWD/wine-${WINE_VERSION}"
 
           # ── 5. Build Wine host tools ───────────────────────────────────────
