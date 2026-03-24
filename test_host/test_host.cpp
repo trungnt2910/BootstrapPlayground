@@ -72,18 +72,7 @@ static LONG WINAPI TopLevelExceptionFilter(EXCEPTION_POINTERS *ep)
     return EXCEPTION_CONTINUE_SEARCH;
 }
 
-// Select the architecture-appropriate lxmonika driver filename.
-#if defined(__x86_64__) || defined(_M_AMD64)
-#define LXMONIKA_SYS "lxmonika_x64.sys"
-#elif defined(__i386__) || defined(_M_IX86)
-#define LXMONIKA_SYS "lxmonika_x86.sys"
-#elif defined(__aarch64__) || defined(_M_ARM64)
-#define LXMONIKA_SYS "lxmonika_arm64.sys"
-#elif defined(__arm__) || defined(_M_ARM)
-#define LXMONIKA_SYS "lxmonika_arm.sys"
-#else
-#error "Unknown target architecture - cannot select lxmonika driver"
-#endif
+#define LXMONIKA_SYS "lxmonika.sys"
 
 // ---------------------------------------------------------------------------
 // Consumer-supplied stub: LxInitialize (normally exported by lxcore.sys).
@@ -119,7 +108,7 @@ int main(int argc, char *argv[])
     // On some Wine+QEMU configurations (e.g. ARM64 under Debian bookworm),
     // heap allocation can silently fail before the runtime is fully set up.
     static char default_path[MAX_PATH + 32];
-    const char *path_cstr = nullptr;
+    const char *pathCStr = nullptr;
 
     for (int i = 1; i < argc; ++i)
     {
@@ -131,11 +120,11 @@ int main(int argc, char *argv[])
         {
             continue;
         }
-        path_cstr = argv[i];
+        pathCStr = argv[i];
         break;
     }
 
-    if (path_cstr == nullptr)
+    if (pathCStr == nullptr)
     {
         DWORD n = GetModuleFileNameA(nullptr, default_path, MAX_PATH);
         if (n > 0)
@@ -159,18 +148,18 @@ int main(int argc, char *argv[])
         }
         std::strncat(
             default_path, LXMONIKA_SYS, sizeof(default_path) - std::strlen(default_path) - 1);
-        path_cstr = default_path;
+        pathCStr = default_path;
     }
 
-    std::println(stderr, "[test_host] Loading driver: {}", path_cstr);
+    std::println(stderr, "[test_host] Loading driver: {}", pathCStr);
 
-    static char pdb_path[MAX_PATH + kDriverPathExtraCapacity];
-    std::strncpy(pdb_path, path_cstr, sizeof(pdb_path) - 1);
-    pdb_path[sizeof(pdb_path) - 1] = '\0';
-    char *pdb_ext = std::strrchr(pdb_path, '.');
+    static char pdbPath[MAX_PATH + kDriverPathExtraCapacity];
+    std::strncpy(pdbPath, pathCStr, sizeof(pdbPath) - 1);
+    pdbPath[sizeof(pdbPath) - 1] = '\0';
+    char *pdb_ext = std::strrchr(pdbPath, '.');
     if (pdb_ext != nullptr)
     {
-        if (static_cast<std::size_t>(&pdb_path[sizeof(pdb_path)] - pdb_ext) >= 5)
+        if (static_cast<std::size_t>(&pdbPath[sizeof(pdbPath)] - pdb_ext) >= 5)
         {
             std::memcpy(pdb_ext, ".pdb", 5);
         }
@@ -180,7 +169,7 @@ int main(int argc, char *argv[])
     {
         // DriverLoader constructor accepts std::string; construct it here
         // inside the try block so any allocation failure is caught.
-        DriverLoader loader(path_cstr);
+        DriverLoader loader(pathCStr);
 
         // Supply the LxInitialize symbol so the driver's import from lxcore.sys
         // resolves to our stub above.
@@ -189,13 +178,13 @@ int main(int argc, char *argv[])
 
         loader.Load();
         std::println(stderr, "[test_host] Driver loaded at {}.", loader.GetBase());
-        if (GetFileAttributesA(pdb_path) == INVALID_FILE_ATTRIBUTES)
+        if (GetFileAttributesA(pdbPath) == INVALID_FILE_ATTRIBUTES)
         {
-            std::println(stderr, "[test_host] FAIL: Required PDB not found: {}", pdb_path);
+            std::println(stderr, "[test_host] FAIL: Required PDB not found: {}", pdbPath);
             return EXIT_FAILURE;
         }
-        loader.LoadPdb(pdb_path);
-        std::println(stderr, "[test_host] Loaded PDB: {}", pdb_path);
+        loader.LoadPdb(pdbPath);
+        std::println(stderr, "[test_host] Loaded PDB: {}", pdbPath);
 
         const NTSTATUS status = loader.CallDriverEntry(std::nullopt);
 

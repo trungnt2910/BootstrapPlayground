@@ -12,24 +12,27 @@ target_link_libraries(test_host PRIVATE driver_loader)
 # executable is self-contained (runs without a separate libc++.dll).
 target_link_options(test_host PRIVATE -static)
 
-file(GLOB DRIVER_FILES "${CMAKE_SOURCE_DIR}/drivers/*.sys")
-file(GLOB DRIVER_PDB_FILES "${CMAKE_SOURCE_DIR}/drivers/*.pdb")
+if(${MINGW_ARCH} STREQUAL "x86_64")
+    set(DRIVER_ARCH "x64")
+elseif(${MINGW_ARCH} STREQUAL "i686")
+    set(DRIVER_ARCH "x86")
+elseif(${MINGW_ARCH} STREQUAL "armv7")
+    set(DRIVER_ARCH "arm")
+elseif(${MINGW_ARCH} STREQUAL "aarch64")
+    set(DRIVER_ARCH "arm64")
+endif()
 
-foreach(driver ${DRIVER_FILES})
-    add_custom_command(TARGET test_host POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "${driver}"
-            "$<TARGET_FILE_DIR:test_host>"
-    )
-endforeach()
+add_custom_command(TARGET test_host POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${CMAKE_SOURCE_DIR}/drivers/lxmonika_${DRIVER_ARCH}.sys"
+        "$<TARGET_FILE_DIR:test_host>/lxmonika.sys"
+)
 
-foreach(driver_pdb ${DRIVER_PDB_FILES})
-    add_custom_command(TARGET test_host POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "${driver_pdb}"
-            "$<TARGET_FILE_DIR:test_host>"
-    )
-endforeach()
+add_custom_command(TARGET test_host POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${CMAKE_SOURCE_DIR}/drivers/lxmonika_${DRIVER_ARCH}.pdb"
+        "$<TARGET_FILE_DIR:test_host>/lxmonika.pdb"
+)
 
 target_compile_options(test_host PRIVATE -gcodeview -O0)
 target_link_options(test_host PRIVATE -Wl,--pdb=)

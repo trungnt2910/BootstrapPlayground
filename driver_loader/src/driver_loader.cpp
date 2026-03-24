@@ -672,7 +672,6 @@ void DriverLoader::LoadPdb(const std::string &pdbPath)
 
     if (!s_dbghelpInitialized)
     {
-        SymSetOptions(SYMOPT_DEFERRED_LOADS | SYMOPT_UNDNAME);
         if (!SymInitialize(proc, nullptr, FALSE))
         {
             throw std::runtime_error("SymInitialize failed");
@@ -685,14 +684,6 @@ void DriverLoader::LoadPdb(const std::string &pdbPath)
         ++s_dbghelpRefcount;
         m_dbghelpAttached = true;
     }
-
-    const auto has_pdb_extension = [](const std::string &path) -> bool
-    {
-        if (path.size() < 4)
-            return false;
-        const std::string_view ext(path.c_str() + (path.size() - 4), 4);
-        return IEqual(ext, ".pdb");
-    };
 
     if (!pdbPath.empty())
     {
@@ -711,24 +702,8 @@ void DriverLoader::LoadPdb(const std::string &pdbPath)
             throw std::runtime_error("PDB path is a directory, not a file: " + pdbPath);
         }
 
-        std::string search_path = pdbPath;
-        if (has_pdb_extension(pdbPath))
-        {
-            const std::size_t sep = pdbPath.find_last_of("/\\");
-            if (sep == std::string::npos)
-            {
-                search_path = ".";
-            }
-            else if (sep == 0)
-            {
-                search_path = pdbPath.substr(0, 1);
-            }
-            else
-            {
-                search_path = pdbPath.substr(0, sep);
-            }
-        }
-        if (!search_path.empty() && !SymSetSearchPath(proc, search_path.c_str()))
+        std::string searchPath = std::filesystem::path(pdbPath).parent_path().string();
+        if (!searchPath.empty() && !SymSetSearchPath(proc, searchPath.c_str()))
         {
             throw std::runtime_error("SymSetSearchPath failed for pdb path: " + pdbPath);
         }
@@ -740,28 +715,37 @@ void DriverLoader::LoadPdb(const std::string &pdbPath)
         m_dbghelpModuleBase = 0;
     }
 
-    DWORD64 mod_base = SymLoadModuleEx(
+    DWORD64 modBase = SymLoadModuleEx(
         proc,
         nullptr,
-        pdbPath.c_str(),
+        m_path.c_str(),
         nullptr,
         reinterpret_cast<DWORD64>(m_base),
         static_cast<DWORD>(m_imageSize),
         nullptr,
         0);
-    if (mod_base == 0)
+    if (modBase == 0)
     {
         DWORD error = GetLastError();
-        throw std::runtime_error(
-            "SymLoadModuleEx failed for image: " + m_path + ", error=" + std::to_string(error)
-        );
+        if (error == 0)
+        {
+            DL_LOG_WARNING("SymLoadModuleEx failed, but the error is 0.");
+            DL_LOG_WARNING("This is expected if running from WINE.");
+            modBase = reinterpret_cast<DWORD64>(m_base);
+        }
+        else
+        {
+            throw std::runtime_error(
+                "SymLoadModuleEx failed for image: " + m_path + ", error=" + std::to_string(error)
+            );
+        }
     }
-    m_dbghelpModuleBase = static_cast<std::uint64_t>(mod_base);
+    m_dbghelpModuleBase = static_cast<std::uint64_t>(modBase);
 
     // Touch symbol loading so failures surface immediately.
     IMAGEHLP_MODULEW64 modinfo = {};
     modinfo.SizeOfStruct = sizeof(modinfo);
-    if (!SymGetModuleInfoW64(proc, mod_base, &modinfo))
+    if (!SymGetModuleInfoW64(proc, modBase, &modinfo))
     {
         throw std::runtime_error("SymGetModuleInfoW64 failed after SymLoadModuleEx");
     }
