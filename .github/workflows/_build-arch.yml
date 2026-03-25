@@ -23,32 +23,32 @@ jobs:
         run: |
           case "${{ inputs.arch }}" in
             x86)
-              echo "mingw_arch=i686"                       >> "$GITHUB_OUTPUT"
-              echo "debian_arch=i386"                      >> "$GITHUB_OUTPUT"
-              echo "debian_multiarch=i386-linux-gnu"       >> "$GITHUB_OUTPUT"
-              echo "wine_arch=win32"                       >> "$GITHUB_OUTPUT"
-              echo "lxmonika_sys=lxmonika_x86.sys"         >> "$GITHUB_OUTPUT"
+              echo "mingw_arch=i686"                        >> "$GITHUB_OUTPUT"
+              echo "alpine_arch=x86"                        >> "$GITHUB_OUTPUT"
+              echo "musl_target=i586-linux-musl"            >> "$GITHUB_OUTPUT"
+              echo "wine_arch=i386"                         >> "$GITHUB_OUTPUT"
+              echo "alpine_host=i586-alpine-linux-musl"     >> "$GITHUB_OUTPUT"
               ;;
             x64)
-              echo "mingw_arch=x86_64"                     >> "$GITHUB_OUTPUT"
-              echo "debian_arch=amd64"                     >> "$GITHUB_OUTPUT"
-              echo "debian_multiarch=x86_64-linux-gnu"     >> "$GITHUB_OUTPUT"
-              echo "wine_arch=win64"                       >> "$GITHUB_OUTPUT"
-              echo "lxmonika_sys=lxmonika_x64.sys"         >> "$GITHUB_OUTPUT"
+              echo "mingw_arch=x86_64"                      >> "$GITHUB_OUTPUT"
+              echo "alpine_arch=x86_64"                     >> "$GITHUB_OUTPUT"
+              echo "musl_target=x86_64-linux-musl"          >> "$GITHUB_OUTPUT"
+              echo "wine_arch=x86_64"                       >> "$GITHUB_OUTPUT"
+              echo "alpine_host=x86_64-alpine-linux-musl"   >> "$GITHUB_OUTPUT"
               ;;
             ARM)
-              echo "mingw_arch=armv7"                      >> "$GITHUB_OUTPUT"
-              echo "debian_arch=armhf"                     >> "$GITHUB_OUTPUT"
-              echo "debian_multiarch=arm-linux-gnueabihf"  >> "$GITHUB_OUTPUT"
-              echo "wine_arch=win32"                       >> "$GITHUB_OUTPUT"
-              echo "lxmonika_sys=lxmonika_arm.sys"         >> "$GITHUB_OUTPUT"
+              echo "mingw_arch=armv7"                          >> "$GITHUB_OUTPUT"
+              echo "alpine_arch=armv7"                         >> "$GITHUB_OUTPUT"
+              echo "musl_target=armv7-linux-musleabihf"        >> "$GITHUB_OUTPUT"
+              echo "wine_arch=arm"                             >> "$GITHUB_OUTPUT"
+              echo "alpine_host=armv7-alpine-linux-musleabihf" >> "$GITHUB_OUTPUT"
               ;;
             ARM64)
-              echo "mingw_arch=aarch64"                    >> "$GITHUB_OUTPUT"
-              echo "debian_arch=arm64"                     >> "$GITHUB_OUTPUT"
-              echo "debian_multiarch=aarch64-linux-gnu"    >> "$GITHUB_OUTPUT"
-              echo "wine_arch=win64"                       >> "$GITHUB_OUTPUT"
-              echo "lxmonika_sys=lxmonika_arm64.sys"       >> "$GITHUB_OUTPUT"
+              echo "mingw_arch=aarch64"                     >> "$GITHUB_OUTPUT"
+              echo "alpine_arch=aarch64"                    >> "$GITHUB_OUTPUT"
+              echo "musl_target=aarch64-linux-musl"         >> "$GITHUB_OUTPUT"
+              echo "wine_arch=aarch64"                      >> "$GITHUB_OUTPUT"
+              echo "alpine_host=aarch64-alpine-linux-musl"  >> "$GITHUB_OUTPUT"
               ;;
           esac
 
@@ -75,18 +75,12 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           TAG="${{ steps.llvm_release.outputs.tag }}"
-          # Select the UCRT Ubuntu x86_64 tarball.  When multiple Ubuntu versions
-          # are published for the same release, sort_by(.name) picks the oldest
-          # Ubuntu version first (e.g. ubuntu-20.04 before ubuntu-22.04) for
-          # maximum runner compatibility.
           URL=$(gh api "repos/mstorsjo/llvm-mingw/releases/tags/${TAG}" \
             --jq '[.assets[]
                    | select(.name | test("ucrt-ubuntu-.*-x86_64\\.tar\\.xz$"))]
                   | sort_by(.name) | .[0].browser_download_url')
-          curl -fL "$URL" -o llvm-mingw.tar.xz
           mkdir llvm-mingw
-          tar -xf llvm-mingw.tar.xz --strip-components=1 -C llvm-mingw
-          rm llvm-mingw.tar.xz
+          curl -fL "$URL" | tar -xJf - --strip-components=1 -C llvm-mingw
 
       # ── CMake build ─────────────────────────────────────────────────────────
 
@@ -100,83 +94,187 @@ jobs:
           export PATH="$PWD/llvm-mingw/bin:$PATH"
           cmake -B build -G Ninja \
             -DCMAKE_TOOLCHAIN_FILE="$PWD/cmake/toolchain.cmake" \
-            -DMINGW_ARCH="${{ steps.vars.outputs.mingw_arch }}" \
+            -DMINGW_ARCH="$MINGW_ARCH" \
             -DCMAKE_BUILD_TYPE=Release
           cmake --build build
 
-      # ── QEMU + Debian chroot + WINE ─────────────────────────────────────────
+      # ── QEMU user-mode emulation ────────────────────────────────────────────
 
-      - name: Install QEMU user-mode emulation and debootstrap
+      - name: Install QEMU user-mode emulation
         run: |
           sudo apt-get update -q
-          sudo apt-get install -y qemu-user-static binfmt-support debootstrap
+          sudo apt-get install -y qemu-user-static binfmt-support
 
-      - name: Cache Debian bookworm chroot with WINE
+      # ── Alpine chroot + Wine (all architectures) ───────────────────────────────
+      #
+      # All four architectures (x86, x64, ARM, ARM64) use the same approach:
+      #   1. Download the latest Alpine mini rootfs for the target architecture
+      #   2. Install musl-dev + gcc into the rootfs to serve as cross-compile sysroot
+      #   3. Build Wine host tools (x86_64 ELF binaries) using the Ubuntu host GCC
+      #   4. Cross-compile Wine from source with the llvm-mingw clang wrapper
+      #   5. Install Wine into the Alpine rootfs and pack as chroot.tar.zst
+
+      - name: Get latest Wine stable version
+        id: wine_version
+        run: |
+          # Scrape the WineHQ download index for the latest X.0 stable release.
+          MAJOR=$(curl -fsSL https://dl.winehq.org/wine/source/ \
+            | grep -oP '(?<=href=")\d+\.\d+(?=/")' \
+            | awk -F. '$2 == "0"' \
+            | sort -V | tail -1)
+          VER=$(curl -fsSL "https://dl.winehq.org/wine/source/${MAJOR}/" \
+            | grep -oP "wine-\K[0-9]+\.[0-9]+(?=\.tar\.xz)" \
+            | sort -V | tail -1)
+          echo "version=${VER}" >> "$GITHUB_OUTPUT"
+          echo "major=${MAJOR}"  >> "$GITHUB_OUTPUT"
+
+      - name: Cache Alpine chroot with Wine
         id: cache_chroot
         uses: actions/cache@v5
         with:
           path: chroot.tar.zst
-          key: chroot-bookworm-${{ steps.vars.outputs.debian_arch }}-wine
+          key: alpine-${{ steps.vars.outputs.alpine_arch }}-wine-${{ steps.wine_version.outputs.version }}
 
-      - name: Create Debian chroot and install WINE
+      - name: Create Alpine chroot with cross-compiled Wine
         if: steps.cache_chroot.outputs.cache-hit != 'true'
         run: |
-          DEBIAN_ARCH="${{ steps.vars.outputs.debian_arch }}"
+          set -e
+          ALPINE_ARCH="${{ steps.vars.outputs.alpine_arch }}"
+          ALPINE_MIRROR="https://dl-cdn.alpinelinux.org/alpine/latest-stable"
+          MUSL_TARGET="${{ steps.vars.outputs.musl_target }}"
+          WINE_VERSION="${{ steps.wine_version.outputs.version }}"
+          WINE_MAJOR="${{ steps.wine_version.outputs.major }}"
+          WINE_ARCH="${{ steps.vars.outputs.wine_arch }}"
+          ALPINE_HOST="${{ steps.vars.outputs.alpine_host }}"
+          MINGW_ARCH="${{ steps.vars.outputs.mingw_arch }}"
+          WORKDIR="${{ github.workspace }}"
+          SYSROOT="$WORKDIR/rootfs"
 
-          # Bootstrap a Debian bookworm root filesystem for the target arch.
-          # qemu-debootstrap handles the QEMU-assisted second stage automatically
-          # for foreign architectures; for native arches it behaves like plain
-          # debootstrap.
-          sudo qemu-debootstrap \
-            --arch="$DEBIAN_ARCH" \
-            bookworm rootfs \
-            https://deb.debian.org/debian
+          export PATH="$WORKDIR/llvm-mingw/bin:$PATH"
 
-          # After qemu-debootstrap, binfmt_misc is registered on the host for
-          # every foreign architecture.  Chroot commands can be invoked directly
-          # without specifying the QEMU interpreter explicitly — the kernel
-          # dispatches foreign ELF binaries through binfmt_misc automatically.
-          sudo chroot rootfs apt-get update -q
+          # ── 1. Alpine mini rootfs ──────────────────────────────────────────
+          FILE=$(curl -fsSL "${ALPINE_MIRROR}/releases/${ALPINE_ARCH}/latest-releases.yaml" \
+            | awk '/flavor: alpine-minirootfs/{found=1} found && /file:/{print $2; found=0}' \
+            | head -1)
+          mkdir -p "$SYSROOT"
+          curl -fL "${ALPINE_MIRROR}/releases/${ALPINE_ARCH}/${FILE}" | \
+            tar -xzf - -C "$SYSROOT"
 
-          # Detect the latest Wine version available in the distro's repository.
-          WINE_VERSION=$(sudo chroot rootfs apt-cache policy wine \
-            | grep Candidate | awk '{print $2}')
-          echo "Latest available Wine version for ${DEBIAN_ARCH}: ${WINE_VERSION}"
+          echo "nameserver 1.1.1.1" > "$SYSROOT/etc/resolv.conf"
+          printf '%s/main\n%s/community\n' \
+            "$ALPINE_MIRROR" "$ALPINE_MIRROR" \
+            | tee "$SYSROOT/etc/apk/repositories" > /dev/null
 
-          # Install Wine.
-          sudo chroot rootfs apt-get install -y wine
+          # ── 2. Install sysroot libraries ───────────────────────────────────
+          sudo chroot "$SYSROOT" apk update
+          sudo chroot "$SYSROOT" apk add --no-cache \
+            musl-dev \
+            linux-headers \
+            zlib-dev \
+            clang
 
-          # Pack the chroot for caching (zstd for a good speed/size trade-off).
-          sudo tar --zstd -cf chroot.tar.zst rootfs
+          LLVM_VER=$(ls "$SYSROOT/usr/lib/clang/" | sort -V | tail -1)
+          CLANG_RES="$SYSROOT/usr/lib/clang/$LLVM_VER"
+          RT_LIB_PATH="$SYSROOT/usr/lib/clang/$LLVM_VER/lib/linux"
+          CUSTOM_LD="lld"
+          SUPPRESS_FLAGS="-Qunused-arguments"
 
-      - name: Restore Debian chroot from cache
+          # ── 3. Host build dependencies ─────────────────────────────────────
+          sudo apt-get install -y flex bison
+
+          # ── 4. Wine source ─────────────────────────────────────────────────
+          curl -fL \
+            "https://dl.winehq.org/wine/source/${WINE_MAJOR}/wine-${WINE_VERSION}.tar.xz" | \
+            tar -xJf -
+          WINE_SRC="$PWD/wine-${WINE_VERSION}"
+
+          # ── 5. Build Wine host tools ───────────────────────────────────────
+          mkdir -p wine-tools-build && cd wine-tools-build
+          CC="clang" CXX="clang++" \
+          "$WINE_SRC/configure" \
+            --enable-archs=x86_64 \
+            --disable-win16 --disable-tests \
+            --without-x \
+            --without-alsa --without-capi --without-coreaudio --without-cups \
+            --without-dbus --without-ffmpeg --without-fontconfig --without-freetype \
+            --without-gettext --without-gphoto --without-gnutls --without-gssapi \
+            --without-gstreamer --without-hwloc --without-inotify --without-krb5 \
+            --without-netapi --without-opencl --without-opengl --without-oss \
+            --without-pcap --without-pcsclite --without-pthread --without-pulse \
+            --without-sane --without-sdl --without-udev --without-unwind \
+            --without-usb --without-v4l2 --without-vulkan --without-wayland \
+            --without-xcomposite --without-xcursor --without-xfixes --without-xinerama \
+            --without-xinput --without-xinput2 --without-xrandr --without-xrender \
+            --without-xshape --without-xshm --without-xxf86vm
+          make -j"$(nproc)" __tooldeps__
+          cd ..
+
+          # ── 6. Cross-compile Wine ──────────────────────────────────────────
+          mkdir -p wine-cross-build && cd wine-cross-build
+          "$WINE_SRC/configure" \
+            --host="${ALPINE_HOST}" \
+            --with-wine-tools=../wine-tools-build \
+            --enable-archs="${WINE_ARCH}" \
+            --disable-tests --disable-win16 \
+            --without-x \
+            --without-alsa --without-capi --without-coreaudio --without-cups \
+            --without-dbus --without-ffmpeg --without-fontconfig --without-freetype \
+            --without-gettext --without-gphoto --without-gnutls --without-gssapi \
+            --without-gstreamer --without-hwloc --without-inotify --without-krb5 \
+            --without-netapi --without-opencl --without-opengl --without-oss \
+            --without-pcap --without-pcsclite --without-pthread --without-pulse \
+            --without-sane --without-sdl --without-udev --without-unwind \
+            --without-usb --without-v4l2 --without-vulkan --without-wayland \
+            --without-xcomposite --without-xcursor --without-xfixes --without-xinerama \
+            --without-xinput --without-xinput2 --without-xrandr --without-xrender \
+            --without-xshape --without-xshm --without-xxf86vm \
+            LD="${CUSTOM_LD}" \
+            CC="clang -target ${MUSL_TARGET} --sysroot=${SYSROOT} -resource-dir=${CLANG_RES} -fuse-ld=${CUSTOM_LD} ${SUPPRESS_FLAGS}" \
+            CXX="clang++ -target ${MUSL_TARGET} --sysroot=${SYSROOT} -resource-dir=${CLANG_RES} -fuse-ld=${CUSTOM_LD} ${SUPPRESS_FLAGS}" \
+            CFLAGS="-I${SYSROOT}/usr/include ${SUPPRESS_FLAGS}" \
+            CXXFLAGS="-I${SYSROOT}/usr/include ${SUPPRESS_FLAGS}" \
+            EXTRACFLAGS="${SUPPRESS_FLAGS}" \
+            CROSSCC="$MINGW_ARCH-w64-mingw32-clang" \
+            LDFLAGS="-fuse-ld=${CUSTOM_LD} -L${SYSROOT}/usr/lib -L${SYSROOT}/lib -L${RT_LIB_PATH}" \
+            CPPFLAGS="-I${SYSROOT}/usr/include"
+          make -j"$(nproc)"
+          sudo PATH=$PATH make DESTDIR="${SYSROOT}" install
+          cd ..
+
+          # ── 7. Pack the chroot ─────────────────────────────────────────────
+          sudo tar --zstd -cf chroot.tar.zst \
+            --exclude='./proc/*' --exclude='./dev/*' \
+            -C $SYSROOT .
+
+      - name: Restore Alpine chroot from cache
         if: steps.cache_chroot.outputs.cache-hit == 'true'
-        run: |
-          sudo tar --zstd -xf chroot.tar.zst
+        run: sudo mkdir -p rootfs && sudo tar --zstd -xf chroot.tar.zst -C rootfs
 
       # ── Run under emulation ─────────────────────────────────────────────────
 
       - name: Run test_host.exe on WINE (${{ inputs.arch }})
         run: |
-          # Bind-mount /proc, /dev, and the workspace into the chroot so that
-          # Wine's wineserver can access kernel interfaces and the binaries are
-          # accessible at /mnt/work/... inside the chroot.
-          sudo mkdir -p rootfs/mnt/work
-          sudo mount --bind /proc  rootfs/proc
-          sudo mount --bind /dev   rootfs/dev
-          sudo mount --bind "$PWD" rootfs/mnt/work
-          trap 'sudo umount rootfs/mnt/work 2>/dev/null || true
-                sudo umount rootfs/dev        2>/dev/null || true
-                sudo umount rootfs/proc       2>/dev/null || true' EXIT
+          WORKDIR="${{ github.workspace }}"
+          SYSROOT="$WORKDIR/rootfs"
+          WINE_ARCH="${{ steps.vars.outputs.wine_arch }}"
+          WINE_BIN="/usr/local/lib/wine/$WINE_ARCH-unix/wine"
+
+          sudo mkdir -p $SYSROOT/mnt/work
+          sudo mount --bind /proc      $SYSROOT/proc
+          sudo mount --bind /dev       $SYSROOT/dev
+          sudo mount --bind "$WORKDIR" $SYSROOT/mnt/work
+          trap 'sudo umount $SYSROOT/mnt/work   2>/dev/null || true
+                sudo umount $SYSROOT/dev        2>/dev/null || true
+                sudo umount $SYSROOT/proc       2>/dev/null || true' EXIT
+
+          # To prevent WINE from whining.
+          sudo chroot $SYSROOT /bin/sh -c 'chown $USER:$USER $HOME'
 
           # Run the driver test host only.
-          # The lxmonika .sys path is passed as a Windows-style path via Wine's
-          # Z: drive, which maps the root filesystem.
-          sudo chroot rootfs \
-            env HOME=/tmp \
-                WINEDLLPATH=/usr/lib/${{ steps.vars.outputs.debian_multiarch }}/wine \
-                WINEARCH=${{ steps.vars.outputs.wine_arch }} \
-            wine /mnt/work/build/test_host/test_host.exe --log-level=trace
+          sudo chroot $SYSROOT env                                \
+            LD_LIBRARY_PATH=/usr/local/lib/wine/$WINE_ARCH-unix   \
+            WINEDLLPATH=/usr/local/lib/wine/$WINE_ARCH-windows    \
+            "$WINE_BIN" /mnt/work/build/test_host/test_host.exe --log-level=trace
 
       # ── Artifact upload ─────────────────────────────────────────────────────
 
@@ -186,7 +284,6 @@ jobs:
         with:
           name: binaries-${{ inputs.arch }}
           path: |
-            build/hello.exe
             build/test_host/test_host.exe
             build/lxmonika_*.sys
             build/lxmonika_*.pdb
