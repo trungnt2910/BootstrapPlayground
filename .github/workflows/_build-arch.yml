@@ -82,13 +82,21 @@ jobs:
           mkdir llvm-mingw
           curl -fL "$URL" | tar -xJf - --strip-components=1 -C llvm-mingw
 
-      # ── Cross-compile hello.exe ─────────────────────────────────────────────
+      # ── CMake build ─────────────────────────────────────────────────────────
 
-      - name: Cross-compile hello.exe for ${{ inputs.arch }}
+      - name: Install Ninja
+        run: sudo apt-get install -y ninja-build
+
+      - name: Build with CMake for ${{ inputs.arch }}
+        env:
+          MINGW_ARCH: ${{ steps.vars.outputs.mingw_arch }}
         run: |
           export PATH="$PWD/llvm-mingw/bin:$PATH"
-          "${{ steps.vars.outputs.mingw_arch }}-w64-mingw32-clang++" \
-            -static -o hello.exe hello.cpp
+          cmake -B build -G Ninja \
+            -DCMAKE_TOOLCHAIN_FILE="$PWD/cmake/toolchain.cmake" \
+            -DMINGW_ARCH="$MINGW_ARCH" \
+            -DCMAKE_BUILD_TYPE=Release
+          cmake --build build
 
       # ── QEMU user-mode emulation ────────────────────────────────────────────
 
@@ -105,12 +113,6 @@ jobs:
       #   3. Build Wine host tools (x86_64 ELF binaries) using the Ubuntu host GCC
       #   4. Cross-compile Wine from source with the llvm-mingw clang wrapper
       #   5. Install Wine into the Alpine rootfs and pack as chroot.tar.zst
-      #
-      # Linker selection:
-      #   x86 / x64  — lld from llvm-mingw (handles elf_i386 / elf_x86_64 well)
-      #   ARM / ARM64 — Ubuntu cross-binutils (arm-linux-gnueabihf-ld /
-      #                 aarch64-linux-gnu-ld); these handle ARM ELF + musl's
-      #                 libc.so GROUP linker script more reliably than lld.
 
       - name: Get latest Wine stable version
         id: wine_version
@@ -250,7 +252,7 @@ jobs:
 
       # ── Run under emulation ─────────────────────────────────────────────────
 
-      - name: Run hello.exe on WINE (${{ inputs.arch }})
+      - name: Run test_host.exe on WINE (${{ inputs.arch }})
         run: |
           WORKDIR="${{ github.workspace }}"
           SYSROOT="$WORKDIR/rootfs"
@@ -268,10 +270,11 @@ jobs:
           # To prevent WINE from whining.
           sudo chroot $SYSROOT /bin/sh -c 'chown $USER:$USER $HOME'
 
-          sudo chroot $SYSROOT env \
-            LD_LIBRARY_PATH=/usr/local/lib/wine/$WINE_ARCH-unix \
-            WINEDLLPATH=/usr/local/lib/wine/$WINE_ARCH-windows \
-            "$WINE_BIN" /mnt/work/hello.exe
+          # Run the driver test host only.
+          sudo chroot $SYSROOT env                                \
+            LD_LIBRARY_PATH=/usr/local/lib/wine/$WINE_ARCH-unix   \
+            WINEDLLPATH=/usr/local/lib/wine/$WINE_ARCH-windows    \
+            "$WINE_BIN" /mnt/work/build/test_host/test_host.exe --log-level=trace
 
       # ── Artifact upload ─────────────────────────────────────────────────────
 
@@ -279,6 +282,9 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: hello-${{ inputs.arch }}
-          path: hello.exe
+          name: binaries-${{ inputs.arch }}
+          path: |
+            build/test_host/test_host.exe
+            build/lxmonika_*.sys
+            build/lxmonika_*.pdb
           if-no-files-found: ignore

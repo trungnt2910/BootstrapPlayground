@@ -1,0 +1,35 @@
+# Build directories
+build/
+build-*/
+
+# CMake generated files
+CMakeFiles/
+cmake_install.cmake
+CMakeCache.txt
+Makefile
+*.cmake
+!cmake/toolchain.cmake
+!cmake/Sanitizers.cmake
+
+# Compiled binaries
+*.exe
+*.sys
+*.dll
+# Allow pre-built test driver binaries committed to source control
+!drivers/*.sys
+*.lib
+*.a
+*.so
+*.pdb
+!drivers/*.pdb
+
+# Ninja build files
+.ninja_deps
+.ninja_log
+build.ninja
+
+# IDE / editor
+.vscode/settings.json
+.vscode/launch.json
+*.swp
+*~
