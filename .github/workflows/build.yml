@@ -41,8 +41,7 @@ jobs:
         run: |
           for ARCH in x86 x64 ARM ARM64; do
             mkdir -p "release/$ARCH"
-            cp "artifacts/binaries-$ARCH/hello.exe"                       "release/$ARCH/hello.exe"
-            cp "artifacts/binaries-$ARCH/test_host/test_host.exe"         "release/$ARCH/test_host.exe"
+            cp "artifacts/binaries-$ARCH/test_host/test_host.exe" "release/$ARCH/test_host.exe"
           done
 
       - name: Determine release version (YYYYMMDD.XX)
