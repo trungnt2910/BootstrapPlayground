@@ -138,6 +138,11 @@ jobs:
           echo "branch_dev=${DEV}"        >> "$GITHUB_OUTPUT"
           echo "version_latest=${LATEST}" >> "$GITHUB_OUTPUT"
 
+          # Use 11.x dev for printf("%Z") support.
+          # Once 12.0 stable is out, we can switch to the latest stable.
+          echo "branch=${DEV}"            >> "$GITHUB_OUTPUT"
+          echo "version=${LATEST}"        >> "$GITHUB_OUTPUT"
+
       - name: Cache Alpine chroot with Wine
         id: cache_chroot
         uses: actions/cache@v5
@@ -152,9 +157,8 @@ jobs:
           ALPINE_ARCH="${{ steps.vars.outputs.alpine_arch }}"
           ALPINE_MIRROR="https://dl-cdn.alpinelinux.org/alpine/latest-stable"
           MUSL_TARGET="${{ steps.vars.outputs.musl_target }}"
-          # Once 12.0 stable is out, we can switch to the latest stable.
-          WINE_VERSION="${{ steps.wine_version.outputs.version_latest }}"
-          WINE_BRANCH="${{ steps.wine_version.outputs.branch_dev }}"
+          WINE_VERSION="${{ steps.wine_version.outputs.version }}"
+          WINE_BRANCH="${{ steps.wine_version.outputs.branch }}"
           WINE_ARCH="${{ steps.vars.outputs.wine_arch }}"
           ALPINE_HOST="${{ steps.vars.outputs.alpine_host }}"
           MINGW_ARCH="${{ steps.vars.outputs.mingw_arch }}"
