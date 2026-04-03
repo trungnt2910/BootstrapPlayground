@@ -122,11 +122,21 @@ jobs:
             | grep -oP '(?<=href=")\d+\.\d+(?=/")' \
             | awk -F. '$2 == "0"' \
             | sort -V | tail -1)
-          VER=$(curl -fsSL "https://dl.winehq.org/wine/source/${MAJOR}/" \
+          STABLE=$(curl -fsSL "https://dl.winehq.org/wine/source/${MAJOR}/" \
             | grep -oP "wine-\K[0-9]+\.[0-9]+(?=\.tar\.xz)" \
             | sort -V | tail -1)
-          echo "version=${VER}" >> "$GITHUB_OUTPUT"
-          echo "major=${MAJOR}"  >> "$GITHUB_OUTPUT"
+
+          DEV=$(curl -fsSL https://dl.winehq.org/wine/source/ \
+            | grep -oP '(?<=href=")\d+\.x(?=/")' \
+            | sort -V | tail -1)
+          LATEST=$(curl -fsSL "https://dl.winehq.org/wine/source/${DEV}/" \
+            | grep -oP "wine-\K[0-9]+\.[0-9]+(?=\.tar\.xz)" \
+            | sort -V | tail -1)
+
+          echo "branch_major=${MAJOR}"    >> "$GITHUB_OUTPUT"
+          echo "version_stable=${STABLE}" >> "$GITHUB_OUTPUT"
+          echo "branch_dev=${DEV}"        >> "$GITHUB_OUTPUT"
+          echo "version_latest=${LATEST}" >> "$GITHUB_OUTPUT"
 
       - name: Cache Alpine chroot with Wine
         id: cache_chroot
@@ -142,8 +152,8 @@ jobs:
           ALPINE_ARCH="${{ steps.vars.outputs.alpine_arch }}"
           ALPINE_MIRROR="https://dl-cdn.alpinelinux.org/alpine/latest-stable"
           MUSL_TARGET="${{ steps.vars.outputs.musl_target }}"
-          WINE_VERSION="${{ steps.wine_version.outputs.version }}"
-          WINE_MAJOR="${{ steps.wine_version.outputs.major }}"
+          WINE_VERSION="${{ steps.wine_version.outputs.version_latest }}"
+          WINE_BRANCH="${{ steps.wine_version.outputs.branch_dev }}"
           WINE_ARCH="${{ steps.vars.outputs.wine_arch }}"
           ALPINE_HOST="${{ steps.vars.outputs.alpine_host }}"
           MINGW_ARCH="${{ steps.vars.outputs.mingw_arch }}"
@@ -183,10 +193,16 @@ jobs:
           sudo apt-get install -y flex bison
 
           # ── 4. Wine source ─────────────────────────────────────────────────
-          curl -fL \
-            "https://dl.winehq.org/wine/source/${WINE_MAJOR}/wine-${WINE_VERSION}.tar.xz" | \
-            tar -xJf -
-          WINE_SRC="$PWD/wine-${WINE_VERSION}"
+          git clone https://github.com/wine-mirror/wine --depth 1
+          WINE_SRC="$PWD/wine"
+
+          # Once 11.6 is out, we can switch to the latest release.
+          # Once 12.0 stable is out, we can switch to the latest stable.
+
+          # curl -fL \
+          #   "https://dl.winehq.org/wine/source/${WINE_BRANCH}/wine-${WINE_VERSION}.tar.xz" | \
+          #   tar -xJf -
+          # WINE_SRC="$PWD/wine-${WINE_VERSION}"
 
           # ── 5. Build Wine host tools ───────────────────────────────────────
           mkdir -p wine-tools-build && cd wine-tools-build
